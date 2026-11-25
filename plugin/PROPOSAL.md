@@ -1,110 +1,136 @@
 # Proposal: `assistant-voice-opencode-plugin` v0.0.1 (MVP)
 
-Status: proposal, not implemented.
+Status: proposal, decisions recorded below. Not implemented.
 Target: OpenCode V2 plugin API (`@opencode/plugin`, `Plugin.define`).
+
+## Decisions (settled)
+
+| Question | Decision |
+|---|---|
+| Explicit tool vs auto-speak | **Hybrid**: auto-speak the finished reply, plus a `voice_speak` tool for ad hoc text |
+| Plugin vs CLI | **Thin shell**: the plugin calls `audioq.py`; Python stays the single implementation |
+| Daemon ownership | **Plugin spawns** `piperd.py --serve --drain`, guarded by a pid file it owns |
+| Config location | **`./.dev/audiomode.jsonc`** from the working directory, same cfg@3 schema |
+| Distribution | **Local `./plugin` only**; publish after the contract survives a release |
+| `away` profile | **Refuse clearly** in 0.0.1; tunnelling is 0.2 |
+| Nudges | Separate concern, extraction proposed but **not blocking** (see below) |
 
 ## Problem
 
 Today the voice tooling is a pseudo-skill: `AGENTS.md` tells an agent to read
 `.dev/audiomode.jsonc`, run `audioq.py say`, and quote the result. It works, but
 every new agent session has to re-learn it, every session writes its own shell
-incantation, and nothing enforces the queue or the preamble. The behaviour is
-documentation, not code.
-
-The plugin turns the documented loop into one tool the model can call, with the
-same config file and the same audio pipeline underneath.
+incantation, and nothing enforces the queue, the preamble, or playback order.
+The behaviour is documentation, not code.
 
 ## Goals (v0.0.1)
 
-1. Register a `voice_speak` tool that synthesises text and enqueues it with the
-   existing `audioq.py`, returning the path, duration and generation time.
-2. Respect `.dev/audiomode.jsonc`: preamble (`enabled`, `session`, `template`),
-   `output.directory`, `length_scale`, and the `home` profile's playback rules.
-3. Start the resident daemon and single drainer once per server process when
-   the socket is absent, and never start a second drainer.
-4. Stay a thin shell over the tested CLI. No Python rewrite, no second queue.
-5. Fail loudly but without breaking the reply: if synthesis or playback fails,
-   return the error as tool content; never throw into the agent loop.
+1. **Auto-speak** the completed assistant reply when the reply config says audio
+   mode is active, with a per-session mute and a message-length cap.
+2. Register a `voice_speak` tool for ad hoc text ("say this out loud"), sharing
+   the same synthesis path as auto-speak.
+3. Respect `.dev/audiomode.jsonc`: preamble, `output.directory`,
+   `length_scale`, `profiles.active`, and the `home` playback rules.
+4. Start the resident daemon and single drainer once, and never start a second.
+5. Stay a thin shell over the tested CLI. No Python rewrite, no second queue.
+6. Fail loudly but without breaking the reply: tool errors are content, and an
+   auto-speak failure is logged, never thrown into the turn.
 
 ## Non-goals (v0.0.1)
 
 - The `away` profile and tunnelling (specified in
   `docs/remote-audio-pairing.md`; plugin 0.2).
-- Auto-speaking every assistant message. MVP is explicit tool calls only.
-- Streaming playback, voice selection UI, or a TUI part.
-- Replacing `AGENTS.md`; it stays the guide for agents that do not load plugins.
+- Streaming playback, voice selection UI, and a TUI part.
+- Replacing `AGENTS.md`; it stays the guide for agents without the plugin.
 
 ## MVP surface
 
 | Piece | Detail |
 |---|---|
-| Tool | `voice_speak` (namespace `voice`), input `{ text: string, session?: string }` |
-| Tool result | one text block: `{"path","seconds","gen","via","spoken"}`; `spoken` is the prefixed transcript |
-| Side effect | WAV in `output.directory`, enqueued through `audioq.py`, played by the drainer |
-| Command | optional `/voice` slash command in 0.0.1: speaks the last assistant message |
-| Config | `.dev/audiomode.jsonc` from `ctx.location.directory`, or `options.config` |
-| Lifecycle | `setup` verifies the toolchain, starts `piperd.py --serve --drain` if the socket is missing, returns a cleanup that leaves it running |
+| Hook | `ctx.session.hook("experimental.idle")` — turn end, speak the last assistant text |
+| Tool | `voice_speak` (namespace `voice`), input `{ text, session?, no_preamble? }` |
+| Command | `/voice on\|off\|status\|say <text>` — per-session toggle and manual speech |
+| Result | `{"path","seconds","gen","via","spoken","spoken_id"}`; `spoken` is the prefixed transcript |
+| Side effect | WAV under `output.directory`, enqueued through `audioq.py`, played by the drainer |
+| Config | `.dev/audiomode.jsonc` (cfg@3) resolved from `ctx.location.directory` |
+| Lifecycle | `setup` verifies the toolchain, starts the daemon if the socket is stale, returns cleanup |
+
+### Auto-speak
+
+The progress plugin already establishes the pattern: on
+`experimental.idle` (used at `index.ts:1159` of `progress-tool-linux-vm`),
+read `ctx.session.context({ sessionID })`, take the last assistant message, and
+extract its `text` parts. Auto-speak reuses that shape.
+
+```ts
+await ctx.session.hook("experimental.idle", async (event) => {
+  const messages = await ctx.session.context({ sessionID: event.sessionID })
+  const last = [...messages].reverse().find(m => m.type === "assistant")
+  if (!last || spoken.has(last.id)) return          // speak each message once
+  const text = textParts(last).join("\n").trim()
+  if (!text || text.length > maxChars) return        // skip, log reason
+  if (!enabledFor(event.sessionID)) return           // profile + mute
+  spoken.add(last.id)
+  await speak({ root, config, text, sessionID: event.sessionID })
+})
+```
+
+Guards, in order: plugin enabled globally → config present and
+`profiles.active === "home"` → session not muted → message not already spoken →
+text within `maxChars` (default 4000) → synthesis succeeded. Dedupe is by
+message id, held in `ctx.storage` so a plugin reload does not repeat a reply.
+
+Two deliberate choices:
+
+- **No synthetic message on failure.** A failed WAV must not turn into an agent
+  turn; log once per session and continue.
+- **One voice per machine.** The queue serialises playback, so two sessions
+  finishing together talk in order, not over each other.
 
 ### Tool sketch
 
 ```ts
-import { Plugin } from "@opencode/plugin"
-import { spawn, execFile } from "node:child_process"
-
-export default Plugin.define({
-  id: "assistant-voice",
-  async setup(ctx) {
-    const root = ctx.options.root ?? "/media/share/opencode-audio-tool"
-    const config = await loadReplyConfig(ctx.location.directory, ctx.options.config)
-
-    await ctx.tool.transform((editor) => {
-      editor.namespace({ name: "voice", description: "Speak a reply through the local Piper queue" })
-      editor.add({
-        name: "speak",
-        description: "Synthesise text and enqueue it for local playback. Returns the WAV path and duration.",
-        input: {
-          type: "object",
-          properties: { text: { type: "string" }, session: { type: "string" } },
-          required: ["text"],
-          additionalProperties: false,
-        },
-        options: { namespace: "voice", codemode: true },
-        execute: async ({ text, session }, context) =>
-          speak({ root, config, text, session, signal: context.signal }),
-      })
-    })
+editor.add({
+  name: "speak",
+  description: "Synthesise text and enqueue it for local playback.",
+  input: {
+    type: "object",
+    properties: {
+      text: { type: "string" },
+      session: { type: "string" },
+      no_preamble: { type: "boolean" },
+    },
+    required: ["text"],
+    additionalProperties: false,
   },
+  options: { namespace: "voice", codemode: true },
+  execute: async (input, context) => speak({ ...input, signal: context.signal }),
 })
 ```
 
-`speak` resolves the binary and model, applies the preamble by calling the CLI
-(`audioq.py say --dry-run` gives the exact spoken form; do not reimplement the
-template), synthesises to `output.directory/reply-<slug>.wav`, then
-`audioq.py enqueue`. Parsing the single JSON line the CLI already prints keeps
-one source of truth.
+Preamble formatting is not reimplemented: `audioq.py say --dry-run` prints the
+exact spoken form, which keeps one source of truth for `{session}`/`{msg}`.
 
 ### Daemon lifecycle
 
-On `setup`:
+1. Socket answers → nothing to do.
+2. Socket missing → spawn `python3 piperd.py --serve --drain` detached,
+   `stdio: "ignore"`, wait up to 10 s for the socket.
+3. Record the pid in `<queue>/.voice-plugin.pid` **under an exclusive-create
+   lock**; a second plugin instance sees the live pid and does not spawn.
+4. Cleanup only stops the pid this plugin recorded; a stale pid file with a dead
+   process is replaced, never trusted.
 
-1. If `piperd.sock` exists → nothing to do.
-2. Else spawn `python3 piperd.py --serve --drain` detached with `stdio: "ignore"`,
-   wait up to 10 s for the socket, and record the pid in `ctx.storage`.
-3. If it never appears, log once and let `audioq.py say` fall back to one-shot
-   synthesis (slower, already supported).
-
-The plugin must never kill a daemon it did not start; `cleanup` only stops the
-process whose pid it recorded.
+If the daemon never appears, `audioq.py say` already falls back to one-shot
+synthesis — slower, but the reply still works.
 
 ## Package layout
 
 ```
 plugin/
   package.json
-  index.ts            # server part: tool + optional command
+  index.ts            # server part: hook, tool, command
 ```
-
-`package.json`:
 
 ```json
 {
@@ -116,75 +142,104 @@ plugin/
 }
 ```
 
-Loading, for local development:
+Local loading:
 
 ```jsonc
 // opencode.jsonc
 { "plugins": [{ "package": "./plugin", "options": { "root": "/media/share/opencode-audio-tool" } }] }
 ```
 
-No build step: the server loads TypeScript directly. Publishing is deferred
-until the API surface survives a release (non-goal for 0.0.1).
+No build step; the server loads TypeScript. Options: `root`, `config`, `auto`
+(default true), `maxChars`, `daemon` (auto|never).
 
 ## Config contract
 
-Reused as-is from `audiomode.example.jsonc` (cfg@3). The plugin reads:
+Reused as-is from `audiomode.example.jsonc` (cfg@3):
 
 | Key | Use |
 |---|---|
 | `preamble.enabled/session/template` | spoken prefix; `"auto"` resolves the session title |
 | `output.directory` | where the linked WAV goes |
 | `synthesis.length_scale`, `.model` | passed to the CLI/daemon |
-| `profiles.active` | `home` = enqueue; `away` → v0.0.1 returns "not implemented yet" |
-| `delivery.allow_remote_upload` | must stay false; the tool never uploads |
+| `profiles.active` | `home` = speak locally; `away` = refuse in 0.0.1 |
+| `delivery.allow_remote_upload` | must stay false; the plugin never uploads |
 
-Missing config means "no preamble, defaults", exactly like the CLI.
+Missing config means no auto-speak and no preamble; the tool still works.
+
+## Nudges: extract or not?
+
+`progress-tool-linux-vm` has a generic-looking nudge engine: rule schema and
+scopes (`custom-nudges.ts`, 962 lines), trigger types (interval / steps / event
+/ either), cooldown, TTL, fire caps, and three delivery modes
+(`context-replace`, `context-alongside`, `synthetic`) implemented on the
+`context` hook and `ctx.session.synthetic`. `say-monitor.ts` is a second,
+purely decision-logic policy.
+
+**Coupling that blocks a clean extraction:** criteria are progress-shaped —
+`statuses`, `staleAfterMs`, `noProgressAfter`, `tree`, `entryIds` — and the
+rules are persisted next to the progress state, with TUI (`tui-nudges.ts`) and
+RPC surfaces reading the same files. A generic manager needs a condition SPI so
+consumers can register evaluators ("progress tree is stale", "three silent tool
+calls", "assistant turn just ended"), not just a rule store.
+
+Recommendation:
+
+- **Do not block the voice plugin on it.** Auto-speak needs one `idle` hook and
+  a mute flag, about 40 lines. Depending on a nudge refactor would couple two
+  releases for no gain.
+- **Extract later as `nudge-manager-opencode-plugin`**, taking the store,
+  scheduler, triggers, cooldowns, and delivery modes, with an SPI for
+  conditions and text. Progress becomes a consumer that registers its tree
+  evaluator; `say-monitor` becomes a second consumer; the voice plugin could
+  register "turn ended, speak it" as a third — though for 0.0.1 it simply calls
+  the same `speak()` directly.
+- Keep the extraction out of both MVPs. It is a multi-surface refactor (server,
+  TUI, RPC, MCP) and the risk lands on the tool the user relies on daily.
 
 ## Acceptance criteria
 
-1. In a project with `.dev/audiomode.jsonc` (`session: "auto"`), calling
-   `voice_speak` produces a WAV, enqueues it, and the audio starts within one
-   second when a drainer is already running.
-2. The returned `spoken` text matches `audioq.py say --dry-run` byte for byte.
-3. Calling it twice concurrently produces two queue items in call order, with
-   no overlapping playback.
-4. A missing binary returns an actionable error as tool content, not a throw,
-   and the agent can continue in text.
-5. `profiles.active: "away"` refuses with "remote profile not implemented in
+1. With a config (`session: "auto"`, `active: "home"`), finishing a turn
+   produces one WAV and one enqueued item; a second idle event for the same
+   message speaks nothing.
+2. `spoken` matches `audioq.py say --dry-run` byte for byte.
+3. `/voice off` silences auto-speak for that session only; `/voice on` restores
+   it; a restart keeps the toggle (storage-scoped per session).
+4. Two concurrent `voice_speak` calls queue two items in call order, no overlap.
+5. A message over `maxChars` is skipped with a logged reason, not truncated
+   mid-word and not spoken in full.
+6. Missing binary or daemon failure returns an actionable tool error (manual
+   call) or a single log line (auto), and the text reply is unaffected.
+7. `profiles.active: "away"` refuses with "remote profile not implemented in
    0.0.1".
-6. No WAV, socket or lock is written inside the repository.
+8. No WAV, socket, or lock is written inside the repository.
 
 ## Test plan
 
-- Unit: preamble resolution against a temp config (enabled/disabled, literal
-  session, `{msg}`-less template, missing config).
-- Unit: slugging and path containment (`../` rejected).
-- Integration: temp queue dir + `--player true` so CI never touches audio; call
-  the tool, assert one enqueued item and its sidecar.
-- Manual: one real session with `OPENCODE_LOG_LEVEL=DEBUG` to confirm plugin
-  load and tool registration.
+- Unit: preamble resolution against a temp config; message selection and
+  dedupe; length cap; mute state.
+- Unit: path containment (`../` rejected) and slugging.
+- Integration: temp queue + `--player true`, fire two idle events with the same
+  message id, assert exactly one item; fire with a new id, assert two.
+- Integration: stale pid file with a dead pid is replaced; live pid is honoured.
+- Manual: one real session with `OPENCODE_LOG_LEVEL=DEBUG` to confirm the hook
+  registers and the daemon survives a plugin reload.
 
 ## Risks and open questions
 
-1. **`audioq.py` still hardcodes `/media/share/linux-piper-helper`** for the
-   one-shot path. The plugin should pass explicit paths, or we fix that first;
-   the daemon path already resolves beside `piperd.py`.
-2. **Runtime**: the server runs on Bun; `node:child_process` works, but the
-   plugin must not assume a login shell or `PATH` beyond `/usr/bin/env`.
-3. **Session title lookup** for `"auto"` preamble duplicates logic that lives
-   in `audioq.py`; call the CLI rather than read `opencode.db` from the plugin.
-4. **Auto-speak** is the obvious next ask; doing it in 0.0.1 would make every
-   reply audible and every failure visible. It belongs behind an explicit
-   config flag once the tool is stable.
-5. **Multiple servers**: a plugin instance per location could start two
-   daemons. The socket check plus the queue's own drainer lock prevents
-   duplicate playback, not duplicate daemons; use a pid file under the queue
-   before shipping.
+1. **`experimental.idle` is experimental.** Isolate it in one module so a hook
+   rename is a one-file fix, and keep the tool path working regardless.
+2. **`audioq.py` hardcodes `/media/share/linux-piper-helper`** for the one-shot
+   path. Fix the path resolution before shipping, or pass explicit paths.
+3. **Speaking everything is noisy.** `maxChars`, per-session mute, and `auto:
+   false` are the escape hatches; watch for sessions that only ever need tools.
+4. **Turn-end text can be long markdown.** Strip code fences and URLs before
+   synthesis; the existing `reply_format.do_not` rules are the spec.
+5. **Duplicate daemons** across plugin instances — solved by the pid file and
+   exclusive create, but only if both instances share the queue directory.
 
 ## Roadmap after 0.0.1
 
-- 0.1: `away` profile, tunnel control and QR pairing from
-  `docs/remote-audio-pairing.md`.
-- 0.2: optional auto-speak on assistant message completion, with a per-session
-  toggle and a global kill switch.
-- 0.3: TUI part for "mute", "replay last", and queue status.
+- 0.1: `away` profile, tunnel control, QR pairing (`docs/remote-audio-pairing.md`).
+- 0.2: extract `nudge-manager-opencode-plugin` with a condition SPI; voice and
+  progress register as consumers.
+- 0.3: TUI part for mute / replay last / queue status.
