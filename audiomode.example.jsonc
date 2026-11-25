@@ -97,7 +97,7 @@
     "why": "a relay that terminates TLS can read the WAV; an unguessable route is not a substitute"
   },
   "toolchain": {
-    // Everything is vendored in this repo; /tmp holds only ephemeral output.
+    // Installed beside this repo by ./fetch.sh; /tmp holds only ephemeral output.
     // Overridable: PIPER_BIN, PIPER_MODEL, AUDIOQ_DIR, AUDIOQ_SOCK, AUDIOQ_PLAYER.
     "root": "/media/share/opencode-audio-tool",
     "binary": "/media/share/opencode-audio-tool/piper/piper",

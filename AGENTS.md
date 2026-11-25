@@ -122,6 +122,10 @@ Rules:
 
 ## 5. Per-reply workflow
 
+If `piper/piper` or `voices/voice.onnx` is missing, run `./fetch.sh` from the
+repo root first; it downloads the pinned binary and default voice and verifies
+their hashes.
+
 ```sh
 REPO=/media/share/opencode-audio-tool
 OUT=/media/share/tmp/audio/opencode-audio-tool/reply-topic-fast.wav

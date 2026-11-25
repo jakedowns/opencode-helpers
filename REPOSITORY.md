@@ -1,19 +1,34 @@
 # opencode-audio-tool
 
-A self-contained copy of the Piper helper and the queue, for other agents and machines.
+A runnable copy of the Piper helper and the queue, for other agents and
+machines. Git carries the code, docs and pins only: the ~500 MB of binary and
+voice data is fetched on demand, and nothing generated is committed.
 
 ## Layout
 
 ```
 audioq.py        client + drainer (say / enqueue / list / status / clear / drain)
-piperd.py        resident daemon; paths now resolve relative to this directory
-piper/           pinned binary (2023.11.14-2 build)
-voices/          model files, including the pinned voice.onnx
-audio-replies/   snapshot of the live queue from /tmp/opencode/audio-replies
+piperd.py        resident daemon; paths resolve relative to this directory
+piper/           fetched by ./fetch.sh — pinned binary (2023.11.14-2 build)
+voices/          fetched by ./fetch.sh — voice.onnx (en_US-lessac-medium)
+audio-replies/   generated at runtime; never committed
 AGENTS.md        agent usage: enable audio mode, per-reply workflow, queue rules
 audiomode.example.jsonc   template for ./.dev/audiomode.jsonc (git-ignored copy)
 docs/remote-audio-pairing.md  away profile over a tunnel: pairing, QR, back-port plan
+SHA256SUMS       hashes the fetch verifies
+fetch.sh         downloads the binary and default voice, then verifies
 ```
+
+## Bootstrap
+
+```sh
+./fetch.sh          # ~50 MB binary + ~63 MB voice, verified against SHA256SUMS
+```
+
+The script is idempotent: it skips files that already exist, so re-running it
+after an upgrade only fetches what is missing. Other voices are listed in its
+output; they are not pinned because each tier is a separate download and each
+has its own dataset licence.
 
 Start with `AGENTS.md` if you are an agent. The reply config is per project,
 resolved from the current directory (`.dev/audiomode.jsonc`, `$AUDIOQ_CONFIG`,

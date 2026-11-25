@@ -39,9 +39,8 @@ desktop.ini
 # audiomode.example.jsonc here (see AGENTS.md); never commit it.
 .dev/
 
-# Runtime replies: the queue (and its drain.log) is generated, never source.
-# Nothing here is a reproducible artifact; the archive snapshot lives at
-# audio-replies/ only where it was committed deliberately.
-audio-replies/queue/
-audio-replies/queue-smoke/
-audio-replies/q-enq/
+# Fetched and generated: run ./fetch.sh to populate. None of this is source,
+# and two voices exceed GitHub's 100 MB per-file limit anyway.
+piper/
+voices/
+audio-replies/

@@ -8,6 +8,11 @@ every reboot — the script was durable, its dependencies were not. This directo
 is on `/media/share` (105 GB free at install) and holds the binary, the voices,
 and the daemon together.
 
+In the git repository (`opencode-audio-tool`) none of that is committed: the
+binary, the voices and every reply are ignored, and `./fetch.sh` restores the
+pinned binary and default voice from their upstream URLs, verifying
+`SHA256SUMS`.
+
 ## For agents
 
 If you are an agent about to speak a reply, read **`AGENTS.md`** first: it
