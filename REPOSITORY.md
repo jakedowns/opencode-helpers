@@ -23,6 +23,24 @@ python3 piperd.py --serve --drain      # one process: daemon + single drainer
 python3 audioq.py status
 ```
 
+## Speaker preamble
+
+Replies can announce which session is talking, because several agent sessions
+share one voice. The field lives in a project's JSONC reply config
+(`.dev/audiomode.jsonc`, or `--config PATH`, or `$AUDIOQ_CONFIG`):
+
+```jsonc
+"preamble": {
+  "enabled": true,          // false = never prefix
+  "session": "auto",        // "auto" = OpenCode session title; or a literal name
+  "template": "{session}, here: {msg}"   // {session} speaker, {msg} reply text
+}
+```
+
+`--no-preamble`, `--session NAME`, `--preamble TEMPLATE`, `--config PATH` and
+`--dry-run` override it per call. With no config file the text is spoken
+unchanged, so existing callers are unaffected.
+
 Paths can be overridden with `PIPER_BIN`, `PIPER_MODEL`, `AUDIOQ_DIR`,
 `AUDIOQ_SOCK`, and `AUDIOQ_PLAYER`.
 

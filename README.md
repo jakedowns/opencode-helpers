@@ -138,6 +138,42 @@ Retention is bounded: `played/` is pruned to 100, `drain.log` rotates at 1 MiB,
 and stale `.part`/orphan sidecars are cleaned by the drainer. `failed/` is kept
 until `clear --failed`.
 
+## Speaker preamble
+
+Several agent sessions can share one Piper voice, so a reply can announce who
+is speaking. `audioq.py say` prefixes the text when a reply config is present:
+
+```
+Portal Test Chamber regression test, here: the sweep finished
+```
+
+The config is JSONC, taken from `--config PATH`, `$AUDIOQ_CONFIG`, or
+`./.dev/audiomode.jsonc` (in that order). With no config, nothing is prefixed.
+
+```jsonc
+"preamble": {
+  "enabled": true,
+  // "auto" = the OpenCode session title for $OPENCODE_SESSION_ID,
+  // read from ~/.local/share/opencode/opencode.db at speak time.
+  "session": "auto",
+  // {session} = speaker, {msg} = reply text. No {msg} -> bare prefix.
+  "template": "{session}, here: {msg}"
+}
+```
+
+Overrides, per call:
+
+```
+audioq.py say --session "ogf-omi" "text"      # literal speaker
+audioq.py say --preamble "{session}, here: {msg}" "text"
+audioq.py say --no-preamble "text"            # skip the announcement
+audioq.py say --dry-run "text"                # print what would be spoken
+```
+
+The session title is resolved on the command line, never stored, so renaming a
+tab changes the announcement. A project that wants a fixed name sets
+`"session"` to a literal string.
+
 ## Measured
 
 | Operation | Time |

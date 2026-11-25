@@ -25,6 +25,7 @@ import json
 import os
 import secrets
 import shutil
+import sqlite3
 import shlex
 import signal
 import socket
@@ -71,6 +72,144 @@ def ensure_queue(queue_dir):
 
 def sidecar_path(wav_path):
     return wav_path[:-4] + ".json" if wav_path.endswith(".wav") else wav_path + ".json"
+
+
+# ---------------------------------------------------------------------------
+# Preamble: announce which session/tab is speaking
+#
+# Multiple agents can share one Piper voice, so each reply opens with the
+# speaker's name. The default template is "<session>, here: <msg>". The
+# session name comes from the reply config (.dev/audiomode.jsonc, see
+# load_reply_config) or, when it says "auto", from the OpenCode session title.
+# ---------------------------------------------------------------------------
+
+DEFAULT_PREAMBLE_TEMPLATE = "{session}, here: {msg}"
+OPENCODE_DB = os.path.expanduser("~/.local/share/opencode/opencode.db")
+
+
+def _strip_jsonc(text):
+    """Drop // and /* */ comments outside strings so json.loads can parse."""
+    out = []
+    i = 0
+    n = len(text)
+    in_str = False
+    while i < n:
+        c = text[i]
+        if in_str:
+            out.append(c)
+            if c == "\\" and i + 1 < n:
+                out.append(text[i + 1])
+                i += 2
+                continue
+            if c == '"':
+                in_str = False
+            i += 1
+            continue
+        if c == '"':
+            in_str = True
+            out.append(c)
+            i += 1
+            continue
+        if c == "/" and i + 1 < n and text[i + 1] == "/":
+            while i < n and text[i] != "\n":
+                i += 1
+            continue
+        if c == "/" and i + 1 < n and text[i + 1] == "*":
+            i += 2
+            while i + 1 < n and not (text[i] == "*" and text[i + 1] == "/"):
+                i += 1
+            i += 2
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def load_reply_config(explicit=None):
+    """Load the JSONC reply config, default ./.dev/audiomode.jsonc.
+
+    Returns {} when there is no config, so a project without one is unchanged.
+    """
+    path = explicit or os.environ.get("AUDIOQ_CONFIG")
+    if not path:
+        candidate = os.path.join(os.getcwd(), ".dev", "audiomode.jsonc")
+        if os.path.exists(candidate):
+            path = candidate
+    if not path or not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            raw = fh.read()
+    except OSError:
+        return {}
+    candidates = [raw, _strip_jsonc(raw)]
+    candidates.append(candidates[-1].replace(",}", "}").replace(",]", "]"))
+    for text in candidates:
+        try:
+            obj = json.loads(text)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            return obj
+    return {}
+
+
+def opencode_session_title(session_id=None):
+    """Title of the current OpenCode session, or None if it cannot be read."""
+    sid = session_id or os.environ.get("OPENCODE_SESSION_ID")
+    if not sid:
+        return None
+    db = os.environ.get("OPENCODE_DB") or OPENCODE_DB
+    if not os.path.exists(db):
+        return None
+    try:
+        con = sqlite3.connect("file:%s?mode=ro" % db, uri=True, timeout=0.25)
+        try:
+            row = con.execute("select title from session_v2 where id = ?", (sid,)).fetchone()
+        finally:
+            con.close()
+    except Exception:
+        return None
+    title = (row[0] or "").strip() if row else ""
+    return title or None
+
+
+def resolve_preamble(args, config):
+    """Return the tone prefix for this reply, or None for none."""
+    if getattr(args, "no_preamble", False):
+        return None
+    template = getattr(args, "preamble", None)
+    session = getattr(args, "session", None)
+    if template is None:
+        section = config.get("preamble")
+        if isinstance(section, dict) and section.get("enabled", True):
+            template = section.get("template") or DEFAULT_PREAMBLE_TEMPLATE
+            session = session or section.get("session")
+        else:
+            return None
+    if not template:
+        return None
+    if not session:
+        session = opencode_session_title()
+    if not session or str(session).lower() == "auto":
+        session = opencode_session_title() or "audio"
+    return template, session
+
+
+def apply_preamble(text, args, config):
+    """Prefix the spoken text with the speaker announcement."""
+    resolved = resolve_preamble(args, config)
+    if not resolved:
+        return text
+    template, session = resolved
+    values = {"session": session, "title": session, "msg": text, "text": text}
+    if "{msg}" in template or "{text}" in template:
+        try:
+            return template.format(**values)
+        except (KeyError, IndexError, ValueError):
+            return text
+    template = template.rstrip()
+    return ("%s %s" % (template, text)) if template else text
 
 
 def _read_json(path):
@@ -771,6 +910,12 @@ def _cmd_say(args):
     if not text:
         raise SystemExit("audioq: refusing to enqueue empty text")
 
+    config = load_reply_config(getattr(args, "config", None))
+    text = apply_preamble(text, args, config)
+    if getattr(args, "dry_run", False):
+        print(text)
+        return 0
+
     result = enqueue(
         text,
         queue_dir=args.queue_dir,
@@ -825,6 +970,17 @@ def build_parser():
                      help="skip text already queued or played within SECONDS")
     say.add_argument("--socket", default=None,
                      help="daemon socket (default: $AUDIOQ_SOCK or " + DEFAULT_SOCK + ")")
+    say.add_argument("--preamble", metavar="TEMPLATE",
+                     help="speaker prefix template, e.g. '{session}, here: {msg}' "
+                          "(default: from .dev/audiomode.jsonc)")
+    say.add_argument("--session", metavar="NAME",
+                     help="speaker name for the preamble; 'auto' = OpenCode session title")
+    say.add_argument("--no-preamble", action="store_true",
+                     help="speak the text without the speaker announcement")
+    say.add_argument("--config", metavar="PATH",
+                     help="JSONC reply config (default: $AUDIOQ_CONFIG or ./.dev/audiomode.jsonc)")
+    say.add_argument("--dry-run", action="store_true",
+                     help="print the text that would be spoken and exit")
     _add_queue_arg(say)
     say.set_defaults(func=_cmd_say)
 
