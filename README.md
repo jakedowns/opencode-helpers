@@ -8,14 +8,29 @@ every reboot — the script was durable, its dependencies were not. This directo
 is on `/media/share` (105 GB free at install) and holds the binary, the voices,
 and the daemon together.
 
+## For agents
+
+If you are an agent about to speak a reply, read **`AGENTS.md`** first: it
+covers enabling audio mode in a project by copying `audiomode.example.jsonc`
+to `./.dev/audiomode.jsonc`, the per-reply workflow, queue etiquette, and the
+config version contract (`opencode-audio-tool/cfg@N`).
+
+`.dev/` holds per-user preferences, not project behaviour, and **should be
+git-ignored** — in this repo and in every project that copies the template.
+The committed template is the only shared copy; never commit a real config.
+With no config, `say` speaks the text unchanged, so nothing is required unless
+audio mode is turned on.
+
 ## Layout
 
 ```
 linux-piper-helper/
-  piper/            extracted piper 2023.11.14-2 (binary + bundled libs + espeak-ng data)
-  voices/           *.onnx and *.onnx.json, one pair per voice
-  piperd.py         resident-model daemon (json-input, unix socket)
-  audioq.py         atomic reply queue + the single drainer that plays it
+  piper/                   extracted piper 2023.11.14-2 (binary + bundled libs + espeak-ng data)
+  voices/                  *.onnx and *.onnx.json, one pair per voice
+  piperd.py                resident-model daemon (json-input, unix socket)
+  audioq.py                atomic reply queue + the single drainer that plays it
+  AGENTS.md                how an agent uses this repo (config, workflow, queue rules)
+  audiomode.example.jsonc  template for ./.dev/audiomode.jsonc (git-ignored copy)
 ```
 
 Size on disk: ~522 MB.
@@ -150,16 +165,31 @@ Portal Test Chamber regression test, here: the sweep finished
 The config is JSONC, taken from `--config PATH`, `$AUDIOQ_CONFIG`, or
 `./.dev/audiomode.jsonc` (in that order). With no config, nothing is prefixed.
 
+`audioq.py` reads **only** the `preamble` object; the rest of the file is the
+agent-facing contract, and `audiomode.example.jsonc` is the full template:
+
 ```jsonc
 "preamble": {
-  "enabled": true,
+  "enabled": true,          // false = never prefix
   // "auto" = the OpenCode session title for $OPENCODE_SESSION_ID,
   // read from ~/.local/share/opencode/opencode.db at speak time.
+  // A literal string pins the speaker name instead.
   "session": "auto",
   // {session} = speaker, {msg} = reply text. No {msg} -> bare prefix.
+  // Unknown placeholders fall back to the unprefixed text.
   "template": "{session}, here: {msg}"
 }
 ```
+
+The file also carries a `version` (the pseudo-package
+`opencode-audio-tool/cfg@N`) so a local copy can be checked against this repo;
+see the version table and bump rules in `AGENTS.md`. Other sections — `trigger`,
+`delivery` (local-only; no uploads), `profiles` (`home` = local playback,
+`away` = no queue, private expiring uploads with inline links), `toolchain`,
+`synthesis`, `output` (durable `directory` plus the ephemeral
+`runtime_queue`), `reply_format`, `script_style`, `fallbacks`, `playback`,
+`streaming`, `daemon`, `gotchas`, `preferences_log` — are instructions for the
+agent, not settings the code validates.
 
 Overrides, per call:
 

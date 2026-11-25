@@ -1,0 +1,246 @@
+// Audio reply mode — template for a project's .dev/audiomode.jsonc.
+//
+// Copy to ./.dev/audiomode.jsonc in the project where you work, then adjust
+// "tool.root" if this repo lives somewhere else. audioq.py looks for the config
+// relative to the current directory (or --config PATH, or $AUDIOQ_CONFIG).
+//
+// This is not an OpenCode skill and not a committed artifact. `.dev/` is
+// git-ignored on purpose: it records one user's preferences, not project
+// behaviour. The committed copy of this template is the only shared version.
+//
+// Consumers:
+//   - audioq.py `say` reads ONLY the `preamble` section.
+//   - every other section is an instruction to the agent reading this file.
+// See AGENTS.md for the full contract and the config version history.
+{
+  "name": "audio-reply",
+  // Schema version of this config, not of the audio. Bump it whenever keys or
+  // their meaning change; record the bump in "preferences_log" and in
+  // AGENTS.md ("Config versions"). The config is versioned in lockstep with
+  // this repo, as the pseudo-package opencode-audio-tool/cfg@2.
+  "version": 2,
+  "scope": "local machine only",
+  "tool": {
+    // The repo this config targets, and the version of its config schema.
+    "name": "opencode-audio-tool",
+    "root": "/media/share/opencode-audio-tool",
+    "config": "opencode-audio-tool/cfg@2"
+  },
+
+  "trigger": {
+    "activate_on": ["AUDIO REPLY MODE ACTIVE", "reply in audio"],
+    "update_on": ["AUDIO MODE PREF UPDATE", "AUDIO MODE UPDATE"],
+    "mode": "manual nudge only",
+    "auto_reminder": "none; the harness does not remind",
+    "persists_until": "the user revokes it or a new session starts without it",
+    "if_not_active": "reply in text only; do not synthesise audio",
+    "if_active": "generate the file in the same turn, keep it local, and link the absolute path; deferring is skipping with better grammar"
+  },
+
+  "delivery": {
+    // Local only for now. Audio is generated, played locally, and linked by
+    // its absolute path. Nothing is uploaded to a public host.
+    "local_only": true,
+    "allow_remote_upload": false,
+    "remote_publish": "disabled",
+    "reason": "temporary: skip mp3/m4a uploads until the user re-enables them",
+    "if_upload_is_requested": "ask first; never upload a reply automatically",
+    "keep_local_copy": "/media/share/tmp/audio/opencode-audio-tool"
+  },
+
+  "profiles": {
+    // One of the keys below. The active profile supplies defaults for
+    // playback, streaming and delivery; anything it does not mention is
+    // inherited from the top-level sections above. A direct instruction from
+    // the user in the session beats this file.
+    // Switch by editing "active", or by telling the agent where you are.
+    "active": "home",
+
+    "home": {
+      "description": "at this machine, listening through its speakers",
+      // Local playback through the single drainer; nothing leaves the machine.
+      "playback": { "enabled": true, "prefer_queue": true },
+      "streaming": { "enabled": true },
+      "delivery": { "local_only": true, "allow_remote_upload": false },
+      "link_style": "bottom"
+    },
+
+    "away": {
+      "description": "away from this machine; listening on a phone or another device",
+      // No speaker here to feed: do not queue, do not play, do not stream.
+      "playback": { "enabled": false, "prefer_queue": false, "enqueue": false },
+      "streaming": { "enabled": false },
+      // Upload instead — but only ever privately, and with a short life.
+      "delivery": {
+        "local_only": false,
+        "allow_remote_upload": true,
+        "prefer_upload": true,
+        "visibility": "private",
+        "expires": true,
+        "expiry_hours": 24
+      },
+      "link_style": "inline",
+      "if_private_unavailable": "ask before uploading; a public link is never a default",
+      "on_upload_failure": "say so; link the local file only if the user can reach this machine"
+    }
+  },
+
+  "toolchain": {
+    // Everything is vendored in this repo; /tmp holds only ephemeral output.
+    // Overridable: PIPER_BIN, PIPER_MODEL, AUDIOQ_DIR, AUDIOQ_SOCK, AUDIOQ_PLAYER.
+    "root": "/media/share/opencode-audio-tool",
+    "binary": "/media/share/opencode-audio-tool/piper/piper",
+    "voices": "/media/share/opencode-audio-tool/voices",
+    "why": "a helper that lives in /tmp breaks on reboot; the script was durable and its dependencies were not"
+  },
+
+  "synthesis": {
+    // Piper is already installed here; no sudo, no pip, no network at speak time.
+    "engine": "piper",
+    "binary": "/media/share/opencode-audio-tool/piper/piper",
+    "model": "/media/share/opencode-audio-tool/voices/voice.onnx",
+    "voice": "en_US-lessac-medium",
+    // 0.67 ≈ 1.5× playback speed; the user's agreed rate and the practical floor.
+    // Only voices from the same 2023.11 generation work (see gotchas).
+    "length_scale": 0.67,
+    "sample_rate_hz": 22050,
+    "channels": 1,
+    "command_template": "cat $TEXT_FILE | /media/share/opencode-audio-tool/piper/piper --model /media/share/opencode-audio-tool/voices/voice.onnx --output_file $OUT_FILE --length_scale 0.67"
+  },
+
+  "output": {
+    // Per project by default, under the durable audio root: clearing this
+    // project's replies cannot break another project's links. Durable means it
+    // survives a reboot; /tmp holds only the live queue below.
+    // To consolidate every project into one directory instead, point this at
+    // the shared root — "directory": "/media/share/tmp/audio" — and put the
+    // project in the filename pattern so names cannot collide:
+    //   "filename_pattern": "reply-<project>-<topic>-fast.wav"
+    "directory": "/media/share/tmp/audio/opencode-audio-tool",
+    // The live queue (and its socket) stays ephemeral by design; a reboot may
+    // empty it, but never the linked WAV above.
+    "runtime_queue": "/tmp/opencode/audio-replies/queue",
+    "filename_pattern": "reply-<topic>-fast.wav",
+    "never_write_to": ["the repository working tree", "out/", "site/"],
+    "verify_after_synthesis": [
+      "file exists and is non-empty",
+      "the wave module reports duration > 0",
+      "report the duration in the text reply"
+    ]
+  },
+
+  "preamble": {
+    // Several agents share one Piper voice, so every reply announces the tab:
+    // "<session>, here: <msg>". This is the only section audioq.py reads.
+    "enabled": true,
+    // "auto" resolves the OpenCode session title at speak time
+    // ($OPENCODE_SESSION_ID -> ~/.local/share/opencode/opencode.db).
+    // Set a literal string to pin a name for this project.
+    "session": "auto",
+    // {session} = speaker name, {msg} = the reply text. A template without
+    // {msg} is treated as a bare prefix. Unknown placeholders fall back to
+    // the unprefixed text.
+    "template": "{session}, here: {msg}",
+    "cli": "python3 /media/share/opencode-audio-tool/audioq.py say \"text\"",
+    "overrides": ["--session NAME", "--no-preamble", "--preamble TEMPLATE", "--dry-run", "--config PATH"],
+    "why": "several sessions share one voice; the reader needs to know who is talking"
+  },
+
+  "reply_format": {
+    "text": "short. The audio carries the detail; the text carries links, paths, numbers and anything that must be copyable.",
+    "audio_link_position": "bottom of the message",
+    // Suffix carries three facts and no timestamps: spoken duration, playback
+    // speed, and how long synthesis took. "Gen time" is effort, not a clock.
+    "link_style": "**Audio:** `<absolute path>` (<duration> s · <speed>× · gen <gen> s)",
+    "suffix_fields": ["duration_s", "speed_x", "generation_s"],
+    "do_not": [
+      "read markdown syntax, code fences or URLs aloud",
+      "paste the full transcript unless asked",
+      "upload audio to a remote service unless the user asks; they are at a terminal"
+    ]
+  },
+
+  "script_style": {
+    "spoken_numbers": "say versions and decimals as words: 'zero point one sixty', 'one point five x'",
+    "sentence_length": "short; one idea per sentence",
+    "target_seconds": [20, 120],
+    "structure": ["what changed", "what it means", "what is outstanding"]
+  },
+
+  "fallbacks": {
+    "piper_missing": "say so in one line and reply in text only; do not use a remote TTS service",
+    "synthesis_fails": "report the error and the text that would have been spoken",
+    "no_wave_module": "fall back to file size as the only duration signal and say so"
+  },
+
+  "playback": {
+    // Best effort: a headless box with no sound device must not fail the reply,
+    // and playback must never delay the text.
+    "attemptAutoPlay": true,
+    // Preferred path: one drainer, an atomic queue, no overlap. Start the
+    // daemon once per session; every reply then enqueues instead of calling
+    // aplay. The hardlink keeps the **Audio:** path valid after playback.
+    "prefer_queue": true,
+    "queue_helper": "/media/share/opencode-audio-tool/audioq.py",
+    "start_drainer_once": "python3 /media/share/opencode-audio-tool/piperd.py --serve --drain",
+    "enqueue_command": "python3 /media/share/opencode-audio-tool/audioq.py enqueue $OUT_FILE --text $TEXT_FILE",
+    // Legacy direct path, kept for a session with no drainer running. flock
+    // blocks until any in-flight reply finishes, so a second reply queues
+    // behind the first instead of talking over it.
+    "player": "aplay",
+    "queue_with": "flock",
+    "command_template": "flock /tmp/opencode/audio-replies/.play.lock aplay -q $OUT_FILE",
+    "on_failure": "log one line, continue; never retry, never block the reply",
+    "if_no_flock": "aplay directly and accept overlap",
+    "never": [
+      "wait for playback before answering",
+      "treat a missing audio device as an error in the reply itself"
+    ]
+  },
+
+  "streaming": {
+    // piper writes raw PCM to stdout as it becomes available; playback can start
+    // before synthesis finishes. Measured: first audio ~0.5 s, complete ~2.4 s
+    // for 32 s of speech, so streaming saves the wait, not the compute.
+    "enabled": true,
+    "command_template": "cat $TEXT_FILE | /media/share/opencode-audio-tool/piper/piper --model /media/share/opencode-audio-tool/voices/voice.onnx --output_raw --length_scale 0.67 | tee $RAW | aplay -q -f S16_LE -r 22050 -c 1",
+    "wrap_after": "wrap $RAW into $OUT as 22050 Hz mono S16 WAV",
+    "tradeoff": "the WAV file is only complete after synthesis ends, so link it after playback, not before",
+    "when_not_to": "very short replies (<15 s): start latency is dominated by model load either way"
+  },
+
+  "daemon": {
+    // Optional: keep the model resident. piper --json-input loads once and takes
+    // one request per line with an output_file; completion is signalled by the
+    // "Real-time factor" line on stderr.
+    "script": "/media/share/opencode-audio-tool/piperd.py",
+    "socket": "/tmp/opencode/audio-replies/piperd.sock",
+    "start": "python3 /media/share/opencode-audio-tool/piperd.py --serve --drain &",
+    "request": "{\"text\": \"...\", \"out\": \"/abs/path.wav\"}",
+    "caveat": "length_scale is a startup flag, not per request; changing speed means restarting",
+    "when_worth_it": "short replies and first-audio latency; for a 45 s reply it saves ~0.2 s of ~2.5 s"
+  },
+
+  "gotchas": [
+    "piper writes its real-time-factor line to stderr; grep it out of logs",
+    "length_scale below ~0.6 becomes hard to follow; 0.67 is the agreed floor",
+    "the voice is en_US-lessac-medium; swapping voices changes pace and needs a new length_scale check",
+    "voices from a newer piper generation crash this 2023 binary (northern_english_male)",
+    "synthesis is cheap (steady state ~0.08 s per daemon request), so regenerating after an edit is fine; report infer seconds as generation time",
+    "never put a creation timestamp in the suffix; the user asked for effort, not a clock",
+    "deferring audio to a later turn is skipping; generate or say why not",
+    "WAV at 22.05 kHz mono is ~10 MB/minute; keep replies short for phone playback",
+    ".dev/ is git-ignored; never commit a reply config or a WAV"
+  ],
+
+  "preferences_log": [
+    { "date": "2026-11-24", "change": "audio mode enabled (OGF-OMI)" },
+    { "date": "2026-11-24", "change": "playback rate raised to 1.5x (length_scale 0.67)" },
+    { "date": "2026-11-24", "change": "audio link moved to the bottom of messages" },
+    { "date": "2026-11-24", "change": "output moved from the repo to /tmp/opencode/audio-replies" },
+    { "date": "2026-11-25", "change": "spoken preamble added: '<session title>, here: <msg>', session title auto-resolved from OpenCode" },
+    { "date": "2026-11-25", "change": "config versioned as opencode-audio-tool/cfg@1 and documented in AGENTS.md" },
+    { "date": "2026-11-25", "change": "aligned with the OGF-OMI reference: added delivery (local only) and output.runtime_queue; linked audio lives under /media/share/tmp/audio" },
+    { "date": "2026-11-25", "change": "cfg@2: added profiles (home = local playback, no uploads; away = no local queue, private expiring uploads with inline links); output.directory defaults per project" }
+  ]
+}

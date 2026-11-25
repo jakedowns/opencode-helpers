@@ -2,3 +2,7 @@ __pycache__/
 *.sock
 .drain.lock
 .play.lock
+
+# Per-project agent preferences, not project behaviour. Copy
+# audiomode.example.jsonc here (see AGENTS.md); never commit it.
+.dev/
