@@ -37,6 +37,7 @@ linux-piper-helper/
   AGENTS.md                how an agent uses this repo (config, workflow, queue rules)
   audiomode.example.jsonc  template for ./.dev/audiomode.jsonc (git-ignored copy)
   docs/remote-audio-pairing.md  away profile: pairing, tunnel, back-port plan
+  plugin/PROPOSAL.md       proposal: assistant-voice-opencode-plugin v0.0.1 (MVP)
 ```
 
 Size on disk: ~522 MB.
