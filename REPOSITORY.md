@@ -12,6 +12,7 @@ voices/          model files, including the pinned voice.onnx
 audio-replies/   snapshot of the live queue from /tmp/opencode/audio-replies
 AGENTS.md        agent usage: enable audio mode, per-reply workflow, queue rules
 audiomode.example.jsonc   template for ./.dev/audiomode.jsonc (git-ignored copy)
+docs/remote-audio-pairing.md  away profile over a tunnel: pairing, QR, back-port plan
 ```
 
 Start with `AGENTS.md` if you are an agent. The reply config is per project,
@@ -45,10 +46,10 @@ share one voice. The field lives in a project's JSONC reply config
 ```
 
 Only `preamble` is read by the code. The full file — `name`, `version`,
-`tool`, `trigger`, `delivery`, `profiles` (`home` / `away`), `toolchain`,
-`synthesis`, `output` (`directory` + `runtime_queue`), `reply_format`,
-`script_style`, `fallbacks`, `playback`, `streaming`, `daemon`, `gotchas`,
-`preferences_log` — is documented in `AGENTS.md` and shipped as
+`tool`, `trigger`, `delivery`, `profiles` (`home` / `away`), `tunnel`,
+`toolchain`, `synthesis`, `output` (`directory` + `runtime_queue`),
+`reply_format`, `script_style`, `fallbacks`, `playback`, `streaming`, `daemon`,
+`gotchas`, `preferences_log` — is documented in `AGENTS.md` and shipped as
 `audiomode.example.jsonc`. `version` tracks the schema as
 `opencode-audio-tool/cfg@N`; bump it when keys or their meaning change.
 

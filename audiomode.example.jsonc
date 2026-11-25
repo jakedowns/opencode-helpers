@@ -17,14 +17,14 @@
   // Schema version of this config, not of the audio. Bump it whenever keys or
   // their meaning change; record the bump in "preferences_log" and in
   // AGENTS.md ("Config versions"). The config is versioned in lockstep with
-  // this repo, as the pseudo-package opencode-audio-tool/cfg@2.
-  "version": 2,
+  // this repo, as the pseudo-package opencode-audio-tool/cfg@3.
+  "version": 3,
   "scope": "local machine only",
   "tool": {
     // The repo this config targets, and the version of its config schema.
     "name": "opencode-audio-tool",
     "root": "/media/share/opencode-audio-tool",
-    "config": "opencode-audio-tool/cfg@2"
+    "config": "opencode-audio-tool/cfg@3"
   },
 
   "trigger": {
@@ -70,21 +70,32 @@
       // No speaker here to feed: do not queue, do not play, do not stream.
       "playback": { "enabled": false, "prefer_queue": false, "enqueue": false },
       "streaming": { "enabled": false },
-      // Upload instead — but only ever privately, and with a short life.
+      // Serve the file over the tunnel instead of uploading it anywhere.
       "delivery": {
-        "local_only": false,
-        "allow_remote_upload": true,
-        "prefer_upload": true,
-        "visibility": "private",
-        "expires": true,
-        "expiry_hours": 24
+        "local_only": true,
+        "allow_remote_upload": false,
+        "prefer": "tunnel",
+        "expires": true
       },
       "link_style": "inline",
-      "if_private_unavailable": "ask before uploading; a public link is never a default",
-      "on_upload_failure": "say so; link the local file only if the user can reach this machine"
+      "if_tunnel_unavailable": "ask before uploading anywhere; a public link is never a default",
+      "on_failure": "say so; the local path is useless while away"
     }
   },
 
+  "tunnel": {
+    // On-demand tunnel for the away profile: carries bytes only, TLS is
+    // terminated on this machine, and it dies with the reply session.
+    // opentunnel is content-blind (the leaf key stays here); Tailscale serve
+    // keeps the file off the public internet entirely.
+    "provider": "opentunnel",
+    "fallback": "tailscale-serve",
+    "ttl_minutes": 30,
+    "qr": "ansi",
+    "tls_terminates_on_host": true,
+    "reject": ["cloudflared-quick", "ngrok", "localtunnel", "pinggy", "bore"],
+    "why": "a relay that terminates TLS can read the WAV; an unguessable route is not a substitute"
+  },
   "toolchain": {
     // Everything is vendored in this repo; /tmp holds only ephemeral output.
     // Overridable: PIPER_BIN, PIPER_MODEL, AUDIOQ_DIR, AUDIOQ_SOCK, AUDIOQ_PLAYER.
@@ -241,6 +252,7 @@
     { "date": "2026-11-25", "change": "spoken preamble added: '<session title>, here: <msg>', session title auto-resolved from OpenCode" },
     { "date": "2026-11-25", "change": "config versioned as opencode-audio-tool/cfg@1 and documented in AGENTS.md" },
     { "date": "2026-11-25", "change": "aligned with the OGF-OMI reference: added delivery (local only) and output.runtime_queue; linked audio lives under /media/share/tmp/audio" },
-    { "date": "2026-11-25", "change": "cfg@2: added profiles (home = local playback, no uploads; away = no local queue, private expiring uploads with inline links); output.directory defaults per project" }
+    { "date": "2026-11-25", "change": "cfg@2: added profiles (home = local playback, no uploads; away = no local queue, private expiring uploads with inline links); output.directory defaults per project" },
+    { "date": "2026-11-25", "change": "cfg@3: away serves over an on-demand tunnel (opentunnel, Tailscale fallback) instead of uploading; uploads are off by default; tunnel TTL 30 min" }
   ]
 }

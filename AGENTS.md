@@ -59,8 +59,9 @@ Two of them are load-bearing even though no code reads them:
   `output.runtime_queue` is the ephemeral queue under `/tmp`, which a reboot
   may empty.
 - `delivery.local_only` / `delivery.allow_remote_upload` decide whether a reply
-  may leave the machine at all; if an upload is requested outside the `away`
-  profile, ask first, per `delivery.if_upload_is_requested`.
+  may leave the machine at all; uploads are off by default, and asking for one
+  needs the user's explicit consent, per `delivery.if_upload_is_requested`.
+  Remote listening is meant to work through the tunnel, not through an upload.
 
 Per-call overrides beat the config:
 
@@ -77,20 +78,27 @@ audioq.py say --dry-run "text"                  # print what would be spoken
 `streaming` and `delivery` by key, and inherits anything it does not mention
 from the top-level sections. A direct instruction from the user beats the file.
 
-| Profile | Local playback | Queue | Uploads | Link |
+| Profile | Local playback | Queue | Remote path | Link |
 |---|---|---|---|---|
 | `home` (default) | on, through the drainer | yes | none; `local_only: true` | bottom of the reply |
-| `away` | off; no queueing, no streaming | no | private, expiring (`expiry_hours: 24`) | inline in the reply |
+| `away` | off; no queueing, no streaming | no | on-demand tunnel to this machine (`tunnel.ttl_minutes`, default 30) | inline in the reply |
 
 `away` exists because there is no speaker to feed and no reachable local path:
-synthesise the WAV, upload it once through a private, short-lived link, and put
-that link inline. Never publish a public link: if the provider cannot do
-private, ask first (`if_private_unavailable`). If the upload fails, say so; do
-not silently fall back to a local path the user cannot reach.
+synthesise the WAV, publish it through the tunnel for a single expiring
+session, and put that link inline. There is no upload: the file stays here and
+the tunnel only forwards bytes. "Private" means TLS terminates on this machine
+(opentunnel) or the file is reachable only inside the tailnet (Tailscale
+`serve`); a provider that can decrypt the stream does not qualify. If no
+tunnel can be opened, say so and ask — never fall back to a public upload or to
+a local path the user cannot reach.
+
+**This path is specified but not implemented yet.** Until `audioq.py share`
+exists, `away` means text replies; see `docs/remote-audio-pairing.md` for the
+protocol, the tunnel choice, and the back-port plan.
 
 Switching: edit `profiles.active`, or just tell the agent "I'm away today".
 Because no code reads this section, the agent must actually honour it — check
-`profiles.active` before choosing between enqueue and upload.
+`profiles.active` before choosing between enqueue and tunnel.
 
 ## 4. Config versions
 
@@ -101,6 +109,7 @@ future agent can tell whether a local copy still matches this repo.
 |---|---|---|
 | 1 | 2026-11-25 | `name`, `version`, `scope`, `tool`, `trigger`, `delivery`, `toolchain`, `synthesis`, `output` (incl. `runtime_queue`), `preamble`, `reply_format`, `script_style`, `fallbacks`, `playback`, `streaming`, `daemon`, `gotchas`, `preferences_log` |
 | 2 | 2026-11-25 | adds `profiles` (`active` + `home`/`away` overrides for `playback`, `streaming`, `delivery`, `link_style`); `output.directory` is per project by default |
+| 3 | 2026-11-25 | adds `tunnel`; `away` serves over the tunnel and stops preferring uploads (`allow_remote_upload: false`) |
 
 Rules:
 

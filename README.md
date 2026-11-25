@@ -31,6 +31,7 @@ linux-piper-helper/
   audioq.py                atomic reply queue + the single drainer that plays it
   AGENTS.md                how an agent uses this repo (config, workflow, queue rules)
   audiomode.example.jsonc  template for ./.dev/audiomode.jsonc (git-ignored copy)
+  docs/remote-audio-pairing.md  away profile: pairing, tunnel, back-port plan
 ```
 
 Size on disk: ~522 MB.
@@ -185,11 +186,12 @@ The file also carries a `version` (the pseudo-package
 `opencode-audio-tool/cfg@N`) so a local copy can be checked against this repo;
 see the version table and bump rules in `AGENTS.md`. Other sections — `trigger`,
 `delivery` (local-only; no uploads), `profiles` (`home` = local playback,
-`away` = no queue, private expiring uploads with inline links), `toolchain`,
-`synthesis`, `output` (durable `directory` plus the ephemeral
-`runtime_queue`), `reply_format`, `script_style`, `fallbacks`, `playback`,
-`streaming`, `daemon`, `gotchas`, `preferences_log` — are instructions for the
-agent, not settings the code validates.
+`away` = no queue, tunnel-served link), `tunnel` (opentunnel, TLS terminated
+here; Tailscale fallback), `toolchain`, `synthesis`, `output` (durable
+`directory` plus the ephemeral `runtime_queue`), `reply_format`, `script_style`,
+`fallbacks`, `playback`, `streaming`, `daemon`, `gotchas`, `preferences_log` —
+are instructions for the agent, not settings the code validates. The remote
+half is specified in `docs/remote-audio-pairing.md` and is not implemented yet.
 
 Overrides, per call:
 
