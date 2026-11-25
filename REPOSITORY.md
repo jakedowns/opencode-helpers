@@ -22,6 +22,9 @@ git-ignored rather than committed.
 
 `audio-replies/queue/` holds the runtime format: items waiting, `playing/`,
 `played/`, `failed/`, and `drain.log`. Sockets and lock files are not archived.
+The queue is generated, so its directories are now git-ignored and untracked —
+the live copy stays on disk, and only the archived replies and transcripts
+under `audio-replies/` are committed.
 
 ## Run
 
