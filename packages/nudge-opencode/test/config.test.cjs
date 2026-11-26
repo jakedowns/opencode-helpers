@@ -8,7 +8,8 @@ const path = require('node:path');
 const test = require('node:test');
 
 const ROOT = path.join(__dirname, '..');
-const ESBUILD = process.env.ESBUILD_BIN || path.join(ROOT, 'node_modules', '.bin', 'esbuild');
+const ESBUILD =
+  process.env.ESBUILD_BIN || require.resolve('esbuild/bin/esbuild');
 const OUT = path.join(os.tmpdir(), `progress-nudge-config-test-${process.pid}`);
 fs.mkdirSync(OUT, { recursive: true });
 execFileSync(
@@ -100,7 +101,11 @@ test('unsupported versions and malformed files are reported, not fatal', () => {
     fs.writeFileSync(e.paths.projectFile, '{ bad json');
     const result = readNudgeConfig(e.paths);
     assert.ok(result.errors.some((error) => /unsupported config version 99/.test(error)));
-    assert.ok(result.errors.some((error) => /bad json|Unexpected/.test(error)));
+    assert.ok(
+      result.errors.some(
+        (error) => error.includes(e.paths.projectFile) && /SyntaxError/.test(error)
+      )
+    );
     assert.equal(result.config.version, 1);
   } finally {
     e.cleanup();

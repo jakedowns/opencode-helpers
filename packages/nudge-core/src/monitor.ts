@@ -36,7 +36,7 @@ import {
   formatAge,
   formatReminder,
   isHealthyWaiting,
-  type NudgeTarget,
+  type ReminderTarget,
 } from "./reminders.js";
 
 export type StrictMode = "nudge" | "force" | "off";
@@ -287,13 +287,13 @@ export function observeToolCall(
  * behind a "context changed and supersedes the previous value" preamble. The
  * payload must still read as a directive if the model skims that wrapper.
  */
-function targetSuffix(target?: NudgeTarget): string {
+function targetSuffix(target?: ReminderTarget): string {
   return target ? ` (${target.id} ${target.status} ${formatAge(target.ageMs)})` : "";
 }
 
 export function silentRunNudge(
   count: number,
-  target?: NudgeTarget,
+  target?: ReminderTarget,
   severity: "info" | "warn" | "block" = "warn"
 ): string {
   return formatReminder(
@@ -303,7 +303,7 @@ export function silentRunNudge(
 }
 
 /** The stale-progress nudge text (pending tasks, unchanged %). */
-export function staleProgressNudge(callsSinceProgress: number, target?: NudgeTarget): string {
+export function staleProgressNudge(callsSinceProgress: number, target?: ReminderTarget): string {
   return formatReminder(
     "warn",
     `${callsSinceProgress} step${callsSinceProgress === 1 ? "" : "s"} without a progress change${targetSuffix(target)}. Next: update detail/progress or close it.`
@@ -317,7 +317,7 @@ export function staleProgressNudge(callsSinceProgress: number, target?: NudgeTar
 export function staleProgressEscalation(
   callsSinceProgress: number,
   staleNudges: number,
-  target?: NudgeTarget
+  target?: ReminderTarget
 ): string {
   return formatReminder(
     "block",
@@ -522,7 +522,7 @@ export interface WallClockInput {
   /** Epoch ms now. */
   now?: number;
   /** The entry to name in the reminder. */
-  target?: NudgeTarget;
+  target?: ReminderTarget;
 }
 
 export interface WallClockOptions {

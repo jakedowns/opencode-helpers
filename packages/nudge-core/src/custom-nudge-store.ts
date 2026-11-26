@@ -178,11 +178,11 @@ export function readSessionNudgeRules(file: string, sessionID: string): ReadRule
   const rules: CustomNudgeRule[] = [];
   const errors: string[] = [];
   for (const item of list) {
-    const result = normalizeNudgeRule({ ...(item as Record<string, unknown>), scope: "session" }, "session");
+    const result = normalizeNudgeRule({ ...item, scope: "session" }, "session");
     if (result.ok && result.rule) rules.push(result.rule);
     else {
       errors.push(
-        `session:${String((item as Record<string, unknown>)?.id ?? "?")}: ${result.errors.join("; ")}`
+        `session:${String(item.id ?? "?")}: ${result.errors.join("; ")}`
       );
     }
   }

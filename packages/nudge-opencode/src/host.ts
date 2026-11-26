@@ -17,9 +17,9 @@ export interface NudgePluginContext {
   options?: Record<string, unknown>;
   tool: {
     list(): Promise<Array<{ id: string }>>;
-    transform(editor: {
-      add(tool: unknown): void;
-    }): Promise<{ dispose?: () => void } | void>;
+    transform(
+      build: (editor: { add(tool: unknown): void }) => void
+    ): Promise<{ dispose?: () => void } | void>;
     hook?(
       name: string,
       handler: (event: unknown) => void
@@ -73,11 +73,15 @@ export async function attachNudge(
 
   const adapter = createNudgeAdapter(
     {
-      putContext: (sessionID, key, text) =>
-        ctx.session.instructions.entry.put({ sessionID, key, value: text }),
-      removeContext: (sessionID, key) =>
-        ctx.session.instructions.entry.remove({ sessionID, key }),
-      synthetic: (sessionID, text) => ctx.session.synthetic({ sessionID, text }),
+      putContext: async (sessionID, key, text) => {
+        await ctx.session.instructions.entry.put({ sessionID, key, value: text });
+      },
+      removeContext: async (sessionID, key) => {
+        await ctx.session.instructions.entry.remove({ sessionID, key });
+      },
+      synthetic: async (sessionID, text) => {
+        await ctx.session.synthetic({ sessionID, text });
+      },
       log,
     },
     {

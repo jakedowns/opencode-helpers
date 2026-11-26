@@ -13,7 +13,8 @@ const path = require('node:path');
 const test = require('node:test');
 
 const ROOT = path.join(__dirname, '..');
-const ESBUILD = process.env.ESBUILD_BIN || path.join(ROOT, 'node_modules', '.bin', 'esbuild');
+const ESBUILD =
+  process.env.ESBUILD_BIN || require.resolve('esbuild/bin/esbuild');
 const OUT = path.join(os.tmpdir(), `progress-reminders-test-${process.pid}`);
 fs.mkdirSync(OUT, { recursive: true });
 for (const name of ['reminders', 'monitor']) {

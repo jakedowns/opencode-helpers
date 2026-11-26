@@ -7,6 +7,7 @@
  * goes through RPC.
  */
 
+import type { NudgeCriteria, NudgeSeverity, NudgeStatus } from "./contract.js";
 import { formatAge, isHealthyWaiting, pickTarget } from "./reminders.js";
 
 /** Custom nudges are opt-in: `{ customNudges: true }` on the plugin entry. */
@@ -16,27 +17,14 @@ export function customNudgesEnabled(options: unknown): boolean {
 }
 
 export type NudgeScope = "global" | "project" | "session";
-export type NudgeSeverity = "info" | "warn" | "block";
 export type NudgeDelivery = "context-replace" | "context-alongside" | "synthetic";
-export type NudgeStatus = "pending" | "running" | "waiting" | "done" | "error";
 
-export type NudgeTrigger =
+/** Custom rules currently support a narrower trigger set than the contract. */
+export type CustomNudgeTrigger =
   | { type: "interval"; everyMs: number }
   | { type: "steps"; everySteps: number }
   | { type: "either"; everyMs?: number; everySteps?: number }
   | { type: "event" };
-
-export interface NudgeCriteria {
-  statuses?: NudgeStatus[];
-  staleAfterMs?: number;
-  noProgressAfterMs?: number;
-  noProgressAfterSteps?: number;
-  inFlight?: "only" | "never" | "any";
-  tree?: "empty" | "nonempty";
-  idleOnly?: boolean;
-  entryIds?: string[];
-  sessions?: "self" | "children" | "all";
-}
 
 export interface CustomNudgeRule {
   id: string;
@@ -45,7 +33,7 @@ export interface CustomNudgeRule {
   scope: NudgeScope;
   text: string;
   severity: NudgeSeverity;
-  trigger: NudgeTrigger;
+  trigger: CustomNudgeTrigger;
   cooldownMs: number;
   criteria: NudgeCriteria;
   delivery: NudgeDelivery;
@@ -198,7 +186,7 @@ export function invalidNudgePlaceholders(text: string): string[] {
   return [...found];
 }
 
-function normalizeTrigger(raw: unknown): { trigger: NudgeTrigger; errors: string[] } {
+function normalizeTrigger(raw: unknown): { trigger: CustomNudgeTrigger; errors: string[] } {
   const errors: string[] = [];
   const value = (raw ?? {}) as Record<string, unknown>;
   const type = String(value.type ?? "interval");

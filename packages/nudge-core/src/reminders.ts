@@ -94,7 +94,7 @@ export function isHealthyWaiting(
   return now - entry.updatedAt < staleAfterMs;
 }
 
-export interface NudgeCandidate {
+export interface ReminderEntry {
   id: string;
   title?: string | null;
   status?: string | null;
@@ -104,7 +104,7 @@ export interface NudgeCandidate {
   cleared?: unknown;
 }
 
-export interface NudgeTarget {
+export interface ReminderTarget {
   id: string;
   title?: string;
   status: string;
@@ -116,9 +116,9 @@ export interface NudgeTarget {
  * running/waiting/pending over done/error.
  */
 export function pickTarget(
-  entries: readonly NudgeCandidate[],
+  entries: readonly ReminderEntry[],
   now: number
-): NudgeTarget | undefined {
+): ReminderTarget | undefined {
   const open = entries.filter(
     (entry) =>
       entry &&
