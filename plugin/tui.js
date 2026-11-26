@@ -18,7 +18,12 @@ function readState(root) {
       global: parsed?.global === true,
       projects: parsed?.projects && typeof parsed.projects === "object" ? parsed.projects : {},
       sessions: parsed?.sessions && typeof parsed.sessions === "object" ? parsed.sessions : {},
-      sidebar: parsed?.sidebar !== false
+      sidebar: parsed?.sidebar !== false,
+      lastPurge: parsed?.lastPurge && typeof parsed.lastPurge.at === "number" ? {
+        at: parsed.lastPurge.at,
+        removed: Number(parsed.lastPurge.removed) || 0,
+        bytes: Number(parsed.lastPurge.bytes) || 0
+      } : void 0
     };
   } catch {
     return EMPTY;
@@ -92,6 +97,11 @@ var tui_default = Plugin.define({
         return ctx.ui.toast.show({ message: `voice: ${statusLine()}`, variant: "info" });
       }
       if (verb === "sidebar") return toggleSidebar();
+      if (verb === "purge") {
+        const days = args[1] !== void 0 ? Number(args[1]) : 0;
+        void purge(Number.isFinite(days) ? days : 0);
+        return;
+      }
       if (verb === "mute" || verb === "unmute") {
         if (!validScope) {
           return ctx.ui.toast.show({ message: "voice: scope must be session, project, or global", variant: "warning" });
@@ -109,7 +119,7 @@ var tui_default = Plugin.define({
         return toggle(scope);
       }
       return ctx.ui.toast.show({
-        message: "voice: /voice [open|status|mute|unmute|toggle|sidebar] [session|project|global]",
+        message: "voice: /voice [open|status|mute|unmute|toggle|sidebar|purge] [session|project|global|days]",
         variant: "warning"
       });
     };
@@ -186,6 +196,13 @@ var tui_default = Plugin.define({
             group: "Voice",
             palette: true,
             run: () => toggle("global")
+          },
+          {
+            id: "assistant-voice.purge",
+            title: "Voice: purge generated audio",
+            group: "Voice",
+            palette: true,
+            run: () => void purge(0)
           },
           {
             id: "assistant-voice.status",

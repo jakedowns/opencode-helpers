@@ -155,6 +155,42 @@ The palette group and the slash command share one dispatcher:
   owner is confirmed dead.
 - Failures are logged and returned as tool content; nothing throws into a turn.
 
+## Format and retention
+
+Links default to **MP3** (`output.format`), because iOS Safari will not play a
+bare WAV reliably. Playback and the queue still use WAV: piper writes the WAV,
+`audioq.py` enqueues it, ffmpeg derives the MP3, and the WAV is unlinked once the
+queue owns its link. If ffmpeg is missing the plugin logs and links the WAV
+instead of failing.
+
+```jsonc
+"output": {
+  "format": "mp3",              // or "wav"
+  "mp3_bitrate": "128k",
+  "ffmpeg": "/media/share/tmp/tools/ffmpeg/ffmpeg",
+  "retention": {
+    "max_age_days": 14,
+    "max_files": 200,
+    "sweep_on_start": true,
+    "sweep_interval_minutes": 60
+  }
+}
+```
+
+A host sweeps `reply-*.wav`/`reply-*.mp3` in `output.directory` on start (after
+30 s) and on the interval, deleting anything older than `max_age_days` and then
+trimming to `max_files`. Manual purge, all three clients:
+
+| Where | Command |
+|---|---|
+| palette | **Voice: purge generated audio** |
+| slash | `/voice purge [days]` — omit days to purge everything |
+| tool | `voice_purge` with optional `days` |
+
+The result is written to `.voice-state.json` (`lastPurge`) so every client can
+show "removed N files, freed X MB"; the slash/palette path in the TUI and GUI
+shows it immediately, and the Audio panel displays the last result.
+
 ## What is not implemented yet
 
 - `/voice` slash commands. Palette commands and the `voice_control` tool cover

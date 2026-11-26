@@ -24,7 +24,7 @@ import {
 } from "node:fs"
 import path from "node:path"
 import { Plugin } from "@opencode/plugin"
-import { readState, resolveMutes, setMute, setSidebar } from "./state.ts"
+import { readState, resolveMutes, setLastPurge, setMute, setSidebar } from "./state.ts"
 import { Voice } from "./rpc.ts"
 
 type Mode = "host" | "client" | "remote"
@@ -134,8 +134,105 @@ type SpeakResult = {
 }
 
 type ReplyConfig = {
-  output?: { directory?: string }
+  output?: {
+    directory?: string
+    format?: "mp3" | "wav"
+    mp3_bitrate?: string
+    ffmpeg?: string
+    retention?: {
+      max_age_days?: number
+      max_files?: number
+      sweep_on_start?: boolean
+      sweep_interval_minutes?: number
+    }
+  }
   synthesis?: { model?: string; length_scale?: number }
+}
+
+const DEFAULT_OUTPUT_DIR = "/media/share/tmp/audio/opencode-audio-tool"
+
+type Retention = { days: number; maxFiles: number; onStart: boolean; intervalMin: number }
+
+function retentionFor(config: ReplyConfig): Retention {
+  const value = config.output?.retention ?? {}
+  const days = Number.isFinite(value.max_age_days) ? Number(value.max_age_days) : 14
+  const maxFiles = Number.isFinite(value.max_files) ? Number(value.max_files) : 200
+  const intervalMin = Number.isFinite(value.sweep_interval_minutes)
+    ? Math.max(1, Number(value.sweep_interval_minutes))
+    : 60
+  return { days, maxFiles, onStart: value.sweep_on_start !== false, intervalMin }
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
+}
+
+function removeReplyWavs(dir: string, days: number, maxFiles?: number): { removed: number; bytes: number } {
+  let names: string[] = []
+  try {
+    names = readdirSync(dir).filter(
+      (name) => name.startsWith("reply-") && (name.endsWith(".wav") || name.endsWith(".mp3")),
+    )
+  } catch {
+    return { removed: 0, bytes: 0 }
+  }
+  const cutoff = Date.now() - days * 86_400_000
+  let removed = 0
+  let bytes = 0
+  const survivors: Array<{ file: string; mtime: number }> = []
+  for (const name of names) {
+    const file = path.join(dir, name)
+    try {
+      const stat = statSync(file)
+      if (days <= 0 || stat.mtimeMs < cutoff) {
+        unlinkSync(file)
+        removed += 1
+        bytes += stat.size
+      } else {
+        survivors.push({ file, mtime: stat.mtimeMs })
+      }
+    } catch {
+      /* vanished or unreadable */
+    }
+  }
+  if (maxFiles !== undefined && survivors.length > maxFiles) {
+    survivors.sort((left, right) => right.mtime - left.mtime)
+    for (const old of survivors.slice(maxFiles)) {
+      try {
+        const stat = statSync(old.file)
+        unlinkSync(old.file)
+        removed += 1
+        bytes += stat.size
+      } catch {
+        /* raced */
+      }
+    }
+  }
+  return { removed, bytes }
+}
+
+async function purgeGenerated(
+  root: string,
+  cwd: string,
+  days?: number,
+): Promise<{ removed: number; bytes: number; freed: string }> {
+  const config = await readConfig(root, cwd)
+  const retention = retentionFor(config)
+  const dir = config.output?.directory || DEFAULT_OUTPUT_DIR
+  const useDays = typeof days === "number" ? days : retention.days
+  const result = removeReplyWavs(dir, useDays, typeof days === "number" ? undefined : retention.maxFiles)
+  if (useDays <= 0) {
+    try {
+      writeFileSync(path.join(root, ".voice-index.json"), "[]\n")
+    } catch {
+      /* index may not exist yet */
+    }
+  }
+  setLastPurge(root, result.removed, result.bytes)
+  return { ...result, freed: formatBytes(result.bytes) }
 }
 
 /** Read the project's reply config through audioq's own JSONC loader. */
@@ -253,13 +350,38 @@ async function speakDurable(
   } catch {
     throw new Error(`audioq enqueue returned no JSON: ${line.slice(0, 200)}`)
   }
+  const format = config.output?.format ?? "mp3"
+  let linkFile = outFile
+  let via = "piper+enqueue"
+  if (format === "mp3") {
+    const mp3 = outFile.replace(/\.wav$/, ".mp3")
+    const ffmpeg =
+      config.output?.ffmpeg || process.env.FFMPEG || "/media/share/tmp/tools/ffmpeg/ffmpeg"
+    const bitrate = config.output?.mp3_bitrate || "128k"
+    const convert = await run(
+      ffmpeg,
+      ["-y", "-hide_banner", "-loglevel", "error", "-i", outFile, "-codec:a", "libmp3lame", "-b:a", bitrate, mp3],
+      { cwd, timeoutMs: 60_000 },
+    )
+    if (convert.code === 0 && existsSync(mp3) && statSync(mp3).size > 0) {
+      linkFile = mp3
+      via = "piper+mp3+enqueue"
+      try {
+        unlinkSync(outFile) // the queue holds its own link or copy
+      } catch {
+        /* keep the wav if SMB still holds it */
+      }
+    } else {
+      log("mp3 transcode failed; keeping wav", convert.stderr.slice(0, 200))
+    }
+  }
   return {
-    path: outFile,
+    path: linkFile,
     queue: queued.path,
     id: queued.id,
     seconds: queued.seconds,
     gen: Number(gen.toFixed(3)),
-    via: "piper+enqueue",
+    via,
   }
 }
 
@@ -363,6 +485,7 @@ function voiceState(root: string, directory: string, sessionID?: string) {
     entries: readIndex(root).map((entry) => ({ path: entry.path, seconds: entry.seconds, at: entry.at })),
     mutes: resolveMutes(state, directory, sessionID),
     sidebar: state.sidebar,
+    lastPurge: state.lastPurge,
   }
 }
 
@@ -486,6 +609,21 @@ export default Plugin.define({
     if (mode === "host") {
       cleanups.push(startRequestWatcher(root, location))
       log("host mode: watching .voice-requests")
+
+      const retention = retentionFor(await readConfig(root, location))
+      const sweep = () => {
+        void purgeGenerated(root, location)
+          .then((result) => {
+            if (result.removed > 0) log(`retention removed ${result.removed} files (${result.freed})`)
+          })
+          .catch((error) => log("retention sweep failed", String(error)))
+      }
+      if (retention.onStart) {
+        const startTimer = setTimeout(sweep, 30_000)
+        cleanups.push(() => clearTimeout(startTimer))
+      }
+      const interval = setInterval(sweep, retention.intervalMin * 60_000)
+      cleanups.push(() => clearInterval(interval))
     }
 
     try {
@@ -507,6 +645,11 @@ export default Plugin.define({
             }
             if (verb === "sidebar") {
               setSidebar(root, scope !== "off")
+              return
+            }
+            if (verb === "purge") {
+              const days = parts[1] !== undefined ? Number(parts[1]) : undefined
+              void purgeGenerated(root, location, Number.isFinite(days) ? Number(days) : undefined)
             }
           },
         })
@@ -530,6 +673,11 @@ export default Plugin.define({
           }
           const scope = (args.scope ?? "session") as "session" | "project" | "global"
           setMute(root, scope, args.directory ?? location, args.sessionID, args.value === true)
+          return voiceState(root, args.directory ?? location, args.sessionID)
+        },
+        purge: async (input: unknown) => {
+          const args = (input ?? {}) as { directory?: string; sessionID?: string; days?: number }
+          await purgeGenerated(root, args.directory ?? location, args.days)
           return voiceState(root, args.directory ?? location, args.sessionID)
         },
         setSidebar: async (input: unknown) => {
@@ -615,6 +763,36 @@ export default Plugin.define({
               return { content: JSON.stringify({ ok: true, scope, mutes: result.mutes, effective: result.effective }) }
             } catch (error) {
               log("voice_control failed", String(error))
+              return { content: `voice: ${String(error)}` }
+            }
+          },
+        })
+
+        editor.add({
+          name: "purge",
+          description:
+            "Delete generated reply audio. Omit days to apply the configured retention; days 0 deletes everything. Returns files removed and bytes freed.",
+          input: {
+            type: "object",
+            properties: { days: { type: "number" } },
+            additionalProperties: false,
+          },
+          options: { namespace: "voice", codemode: true },
+          execute: async (input: unknown) => {
+            try {
+              const args = (input ?? {}) as { days?: number }
+              const days = typeof args.days === "number" ? args.days : undefined
+              const result = await purgeGenerated(root, location, days)
+              return {
+                content: JSON.stringify({
+                  ok: true,
+                  removed: result.removed,
+                  bytes: result.bytes,
+                  freed: result.freed,
+                }),
+              }
+            } catch (error) {
+              log("voice_purge failed", String(error))
               return { content: `voice: ${String(error)}` }
             }
           },

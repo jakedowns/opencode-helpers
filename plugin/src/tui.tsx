@@ -14,6 +14,7 @@ import path from "node:path"
 import { createSignal } from "solid-js"
 import { Plugin } from "@opencode/plugin/tui"
 import { readState, resolveMutes, setMute, setSidebar } from "../state.ts"
+import { Voice } from "../rpc.ts"
 
 type Scope = "session" | "project" | "global"
 type IndexEntry = { path: string; seconds?: number; at: number }
@@ -26,6 +27,13 @@ function readIndex(root: string, limit = 4): IndexEntry[] {
   } catch {
     return []
   }
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
 }
 
 function age(at: number): string {
@@ -68,6 +76,11 @@ export default Plugin.define({
         return ctx.ui.toast.show({ message: `voice: ${statusLine()}`, variant: "info" })
       }
       if (verb === "sidebar") return toggleSidebar()
+      if (verb === "purge") {
+        const days = args[1] !== undefined ? Number(args[1]) : 0
+        void purge(Number.isFinite(days) ? days : 0)
+        return
+      }
       if (verb === "mute" || verb === "unmute") {
         if (!validScope) {
           return ctx.ui.toast.show({ message: "voice: scope must be session, project, or global", variant: "warning" })
@@ -85,7 +98,7 @@ export default Plugin.define({
         return toggle(scope)
       }
       return ctx.ui.toast.show({
-        message: "voice: /voice [open|status|mute|unmute|toggle|sidebar] [session|project|global]",
+        message: "voice: /voice [open|status|mute|unmute|toggle|sidebar|purge] [session|project|global|days]",
         variant: "warning",
       })
     }
@@ -199,6 +212,13 @@ export default Plugin.define({
             group: "Voice",
             palette: true,
             run: () => toggle("global"),
+          },
+          {
+            id: "assistant-voice.purge",
+            title: "Voice: purge generated audio",
+            group: "Voice",
+            palette: true,
+            run: () => void purge(0),
           },
           {
             id: "assistant-voice.status",

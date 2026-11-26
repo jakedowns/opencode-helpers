@@ -12,7 +12,8 @@ import { Voice } from "../rpc.ts"
 
 type Entry = { path: string; seconds?: number; at: number }
 type Mutes = { session: boolean; project: boolean; global: boolean }
-type State = { entries: Entry[]; mutes: Mutes; sidebar: boolean }
+type Purge = { at: number; removed: number; bytes: number }
+type State = { entries: Entry[]; mutes: Mutes; sidebar: boolean; lastPurge?: Purge }
 
 type Session = { id: string; directory: string }
 
@@ -23,6 +24,13 @@ const tab: PanelTab = {
   },
   closable: "compact",
   fallback: true,
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
 }
 
 function age(at: number): string {
@@ -44,6 +52,13 @@ function AudioPanel(props: { session: Session }) {
       .catch(() => {})
 
   void refresh()
+
+  const purge = () =>
+    ctx.client
+      .rpc(Voice)
+      .purge({ directory: props.session.directory, sessionID: props.session.id, days: 0 })
+      .then((next: unknown) => setState(next as State))
+      .catch(() => {})
 
   const toggle = (scope: "session" | "project" | "global") => {
     const current = state()?.mutes
@@ -82,7 +97,16 @@ function AudioPanel(props: { session: Session }) {
         <button type="button" onClick={() => toggle("global")}>
           Mute all
         </button>
+        <button type="button" onClick={() => void purge()}>
+          Purge audio
+        </button>
       </div>
+      <Show when={state()?.lastPurge}>
+        <div style={{ opacity: 0.7 }}>
+          Last purge: removed {state()?.lastPurge?.removed} file
+          {state()?.lastPurge?.removed === 1 ? "" : "s"}, freed {formatBytes(state()?.lastPurge?.bytes ?? 0)}
+        </div>
+      </Show>
       <Show when={state()?.entries.length} fallback={<div style={{ opacity: 0.6 }}>No audio yet.</div>}>
         <div style={{ display: "flex", "flex-direction": "column", gap: "4px" }}>
           <For each={state()?.entries ?? []}>
@@ -132,6 +156,15 @@ export default Plugin.define({
       const session = current()
       if (!session) return
       if (verb === "status") return openTool()
+      if (verb === "purge") {
+        const days = parts[1] !== undefined ? Number(parts[1]) : 0
+        void ctx.client
+          .rpc(Voice)
+          .purge({ directory: session.directory, sessionID: session.id, days: Number.isFinite(days) ? days : 0 })
+          .then(() => openTool())
+          .catch(() => {})
+        return
+      }
       if (verb === "mute" || verb === "unmute") {
         if (scope !== "session" && scope !== "project" && scope !== "global") return
         void ctx.client.rpc(Voice).setMute({
@@ -154,6 +187,17 @@ export default Plugin.define({
         slash: { name: "voice", arguments: true },
         featured: true,
         run: (input) => runCommand(input),
+      }),
+    )
+
+    ctx.add(
+      Command,
+      (): Command => ({
+        id: "purge",
+        title: "Voice: purge generated audio",
+        group: "Voice",
+        keywords: "audio cache cleanup disk space delete",
+        run: () => runCommand("purge"),
       }),
     )
 

@@ -34,6 +34,16 @@ const state = {
     entries: { type: "array", items: entry },
     mutes,
     sidebar: { type: "boolean" },
+    lastPurge: {
+      type: "object",
+      properties: {
+        at: { type: "number" },
+        removed: { type: "number" },
+        bytes: { type: "number" },
+      },
+      required: ["at", "removed", "bytes"],
+      additionalProperties: false,
+    },
   },
   required: ["entries", "mutes", "sidebar"],
   additionalProperties: false,
@@ -65,6 +75,18 @@ export const Voice = Rpc.define({
           value: { type: "boolean" },
         },
         required: ["directory", "scope", "value"],
+        additionalProperties: false,
+      },
+      output: state,
+    },
+    purge: {
+      input: {
+        type: "object",
+        properties: {
+          ...location,
+          days: { type: "number" },
+        },
+        required: ["directory"],
         additionalProperties: false,
       },
       output: state,

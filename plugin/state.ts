@@ -10,11 +10,14 @@ import path from "node:path"
 
 export type Scope = "session" | "project" | "global"
 
+export type LastPurge = { at: number; removed: number; bytes: number }
+
 export type VoiceState = {
   global: boolean
   projects: Record<string, boolean>
   sessions: Record<string, boolean>
   sidebar: boolean
+  lastPurge?: LastPurge
 }
 
 const EMPTY: VoiceState = { global: false, projects: {}, sessions: {}, sidebar: true }
@@ -31,6 +34,14 @@ export function readState(root: string): VoiceState {
       projects: parsed?.projects && typeof parsed.projects === "object" ? parsed.projects : {},
       sessions: parsed?.sessions && typeof parsed.sessions === "object" ? parsed.sessions : {},
       sidebar: parsed?.sidebar !== false,
+      lastPurge:
+        parsed?.lastPurge && typeof parsed.lastPurge.at === "number"
+          ? {
+              at: parsed.lastPurge.at,
+              removed: Number(parsed.lastPurge.removed) || 0,
+              bytes: Number(parsed.lastPurge.bytes) || 0,
+            }
+          : undefined,
     }
   } catch {
     return EMPTY
@@ -72,5 +83,11 @@ export function setMute(
 export function setSidebar(root: string, visible: boolean): VoiceState {
   const state = readState(root)
   state.sidebar = visible
+  return writeState(root, state)
+}
+
+export function setLastPurge(root: string, removed: number, bytes: number): VoiceState {
+  const state = readState(root)
+  state.lastPurge = { at: Date.now(), removed, bytes }
   return writeState(root, state)
 }

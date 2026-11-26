@@ -110,6 +110,7 @@ future agent can tell whether a local copy still matches this repo.
 | 1 | 2026-11-25 | `name`, `version`, `scope`, `tool`, `trigger`, `delivery`, `toolchain`, `synthesis`, `output` (incl. `runtime_queue`), `preamble`, `reply_format`, `script_style`, `fallbacks`, `playback`, `streaming`, `daemon`, `gotchas`, `preferences_log` |
 | 2 | 2026-11-25 | adds `profiles` (`active` + `home`/`away` overrides for `playback`, `streaming`, `delivery`, `link_style`); `output.directory` is per project by default |
 | 3 | 2026-11-25 | adds `tunnel`; `away` serves over the tunnel and stops preferring uploads (`allow_remote_upload: false`) |
+| 4 | 2026-11-26 | `output.format` (mp3 default), `output.mp3_bitrate`, `output.ffmpeg`, `output.retention` (14 days / 200 files) |
 
 Rules:
 

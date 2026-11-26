@@ -17,14 +17,14 @@
   // Schema version of this config, not of the audio. Bump it whenever keys or
   // their meaning change; record the bump in "preferences_log" and in
   // AGENTS.md ("Config versions"). The config is versioned in lockstep with
-  // this repo, as the pseudo-package opencode-audio-tool/cfg@3.
-  "version": 3,
+  // this repo, as the pseudo-package opencode-audio-tool/cfg@4.
+  "version": 4,
   "scope": "local machine only",
   "tool": {
     // The repo this config targets, and the version of its config schema.
     "name": "opencode-audio-tool",
     "root": "/media/share/opencode-audio-tool",
-    "config": "opencode-audio-tool/cfg@3"
+    "config": "opencode-audio-tool/cfg@4"
   },
 
   "trigger": {
@@ -131,6 +131,17 @@
     // The live queue (and its socket) stays ephemeral by design; a reboot may
     // empty it, but never the linked WAV above.
     "runtime_queue": "/tmp/opencode/audio-replies/queue",
+    // Links point at MP3 (iOS Safari will not play a bare WAV reliably).
+    // The queue and playback still use WAV; the MP3 is derived and kept.
+    "format": "mp3",
+    "mp3_bitrate": "128k",
+    "ffmpeg": "/media/share/tmp/tools/ffmpeg/ffmpeg",
+    "retention": {
+      "max_age_days": 14,
+      "max_files": 200,
+      "sweep_on_start": true,
+      "sweep_interval_minutes": 60
+    },
     "filename_pattern": "reply-<topic>-fast.wav",
     "never_write_to": ["the repository working tree", "out/", "site/"],
     "verify_after_synthesis": [
@@ -253,6 +264,7 @@
     { "date": "2026-11-25", "change": "config versioned as opencode-audio-tool/cfg@1 and documented in AGENTS.md" },
     { "date": "2026-11-25", "change": "aligned with the OGF-OMI reference: added delivery (local only) and output.runtime_queue; linked audio lives under /media/share/tmp/audio" },
     { "date": "2026-11-25", "change": "cfg@2: added profiles (home = local playback, no uploads; away = no local queue, private expiring uploads with inline links); output.directory defaults per project" },
-    { "date": "2026-11-25", "change": "cfg@3: away serves over an on-demand tunnel (opentunnel, Tailscale fallback) instead of uploading; uploads are off by default; tunnel TTL 30 min" }
+    { "date": "2026-11-25", "change": "cfg@3: away serves over an on-demand tunnel (opentunnel, Tailscale fallback) instead of uploading; uploads are off by default; tunnel TTL 30 min" },
+    { "date": "2026-11-26", "change": "cfg@4: links default to MP3 (iOS), retention policy (14 days / 200 files), manual purge command" }
   ]
 }
