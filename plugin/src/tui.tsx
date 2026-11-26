@@ -13,7 +13,7 @@ import { readFileSync } from "node:fs"
 import path from "node:path"
 import { createSignal } from "solid-js"
 import { Plugin } from "@opencode/plugin/tui"
-import { readState, resolveMutes, setMute, setSidebar } from "./state.ts"
+import { readState, resolveMutes, setMute, setSidebar } from "../state.ts"
 
 type Scope = "session" | "project" | "global"
 type IndexEntry = { path: string; seconds?: number; at: number }

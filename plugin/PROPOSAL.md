@@ -19,11 +19,11 @@ Target: OpenCode V2 plugin API (`@opencode/plugin`, `Plugin.define`).
 | Audio links | **TUI sidebar panel** of recent audio, not a synthetic message |
 | Done bar | Offline unit + integration tests, plus one real manual session |
 
-As built in the stub: mutes are `voice_control` tool actions, palette commands,
-and `/voice mute|unmute|toggle` slash commands with the same three scopes,
-stored in `.voice-state.json` at the plugin root (shared with the TUI,
-git-ignored). The sidebar list and its palette/slash toggle are implemented,
-along with the audio tool page and the mute toggles; daemon guard and backoff
+As built in the stub: mutes are `voice_control` tool actions, palette and slash
+commands in both clients, and TUI buttons, all sharing `.voice-state.json` at
+the plugin root. The desktop GUI ships a Command group (`/voice`), an Audio tab
+in the side panel, a New-tab launcher, and RPC-backed mute toggles; the TUI
+ships the sidebar slot, audio tool page, and `/voice`. Daemon guard and backoff
 are in place. Unit tests remain.
 
 ## Problem

@@ -1,10 +1,10 @@
-// plugin/tui.tsx
+// src/tui.tsx
 import { readFileSync as readFileSync2 } from "node:fs";
 import path2 from "node:path";
 import { createSignal } from "solid-js";
 import { Plugin } from "@opencode/plugin/tui";
 
-// plugin/state.ts
+// state.ts
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 var EMPTY = { global: false, projects: {}, sessions: {}, sidebar: true };
@@ -54,7 +54,7 @@ function setSidebar(root, visible) {
   return writeState(root, state);
 }
 
-// plugin/tui.tsx
+// src/tui.tsx
 function readIndex(root, limit = 4) {
   try {
     const parsed = JSON.parse(readFileSync2(path2.join(root, ".voice-index.json"), "utf8"));

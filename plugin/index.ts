@@ -22,7 +22,8 @@ import {
 } from "node:fs"
 import path from "node:path"
 import { Plugin } from "@opencode/plugin"
-import { readState, resolveMutes, setMute } from "./state.ts"
+import { readState, resolveMutes, setMute, setSidebar } from "./state.ts"
+import { Voice } from "./rpc.ts"
 
 type Options = {
   root?: string
@@ -341,6 +342,25 @@ function ensureDaemon(root: string, queueDir: string, sock: string): void {
   })().catch((error) => log("daemon start failed", String(error)))
 }
 
+function readIndex(root: string, limit = 20): IndexEntry[] {
+  try {
+    const parsed = JSON.parse(readFileSync(path.join(root, ".voice-index.json"), "utf8"))
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((entry) => entry && typeof entry.path === "string").slice(0, limit)
+  } catch {
+    return []
+  }
+}
+
+function voiceState(root: string, directory: string, sessionID?: string) {
+  const state = readState(root)
+  return {
+    entries: readIndex(root).map((entry) => ({ path: entry.path, seconds: entry.seconds, at: entry.at })),
+    mutes: resolveMutes(state, directory, sessionID),
+    sidebar: state.sidebar,
+  }
+}
+
 export default Plugin.define({
   id: "assistant-voice",
   async setup(ctx) {
@@ -354,6 +374,60 @@ export default Plugin.define({
     const spoken = new Set<string>()
     const queueDir = process.env.AUDIOQ_DIR || "/tmp/opencode/audio-replies/queue"
     const sock = process.env.AUDIOQ_SOCK || "/tmp/opencode/audio-replies/piperd.sock"
+
+    try {
+      await ctx.command.transform((editor) => {
+        editor.add({
+          name: "voice",
+          description: "Voice: mute or unmute auto-speak (session, project, global)",
+          execute: async ({ sessionID, prompt }) => {
+            const parts = String((prompt as { text?: string } | undefined)?.text ?? "")
+              .trim()
+              .split(/\s+/)
+              .filter(Boolean)
+            const verb = (parts[0] ?? "").toLowerCase()
+            const scope = (parts[1] ?? "session").toLowerCase()
+            if (scope !== "session" && scope !== "project" && scope !== "global") return
+            if (verb === "mute" || verb === "unmute") {
+              setMute(root, scope, location, sessionID, verb === "mute")
+              return
+            }
+            if (verb === "sidebar") {
+              setSidebar(root, scope !== "off")
+            }
+          },
+        })
+      })
+    } catch (error) {
+      log("command registration failed", String(error))
+    }
+
+    try {
+      await ctx.rpc.register(Voice, {
+        state: async (input: unknown) => {
+          const args = (input ?? {}) as { directory?: string; sessionID?: string }
+          return voiceState(root, args.directory ?? location, args.sessionID)
+        },
+        setMute: async (input: unknown) => {
+          const args = (input ?? {}) as {
+            directory?: string
+            sessionID?: string
+            scope?: string
+            value?: boolean
+          }
+          const scope = (args.scope ?? "session") as "session" | "project" | "global"
+          setMute(root, scope, args.directory ?? location, args.sessionID, args.value === true)
+          return voiceState(root, args.directory ?? location, args.sessionID)
+        },
+        setSidebar: async (input: unknown) => {
+          const args = (input ?? {}) as { visible?: boolean }
+          setSidebar(root, args.visible === true)
+          return voiceState(root, location)
+        },
+      })
+    } catch (error) {
+      log("rpc registration failed", String(error))
+    }
 
     try {
       await ctx.tool.transform((editor) => {

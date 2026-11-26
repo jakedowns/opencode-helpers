@@ -38,7 +38,10 @@ linux-piper-helper/
   audiomode.example.jsonc  template for ./.dev/audiomode.jsonc (git-ignored copy)
   docs/remote-audio-pairing.md  away profile: pairing, tunnel, back-port plan
   plugin/PROPOSAL.md       proposal: assistant-voice-opencode-plugin v0.0.1 (MVP)
-  plugin/index.ts          server part: voice_speak tool + auto-speak hook (stub)
+  plugin/index.ts          server part: voice_speak tool, auto-speak hook, RPC, /voice
+  plugin/src/              client sources: TUI panel + GUI commands/panel
+  plugin/tui.js            built TUI part (root file-name convention)
+  plugin/gui-experimental.cjs  built desktop GUI part
   plugin/README.md         load locally, options, what works and what does not
   plugin/dist/tui.js       prebuilt TUI part (esbuild; see plugin/README.md)
 ```

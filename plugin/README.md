@@ -31,21 +31,34 @@ global entry avoids project-vs-global ordering surprises. Auto-speak still
 follows the per-project `.dev/audiomode.jsonc`, so projects without one stay
 silent.
 
-The server part is loaded from `index.ts` directly. The TUI part ships prebuilt
-(`dist/tui.js`) because the TUI does not transpile TSX for local packages;
-rebuild it after editing `tui.tsx`:
+The server part is loaded from `index.ts` directly. The TUI and GUI parts ship
+prebuilt at the package root, because a local plugin directory without
+`name`/`exports` resolves parts **by file name**: `index.ts` (server), `tui.js`,
+`rpc.ts`, and `gui-experimental.cjs`. That convention is deliberate — the
+exports-map path silently dropped `rpc` and `gui` for this package, while the
+file-name path reports all four parts.
 
 ```sh
 cd plugin
-npx esbuild tui.tsx --bundle --format=esm --platform=node --target=node20 \
-  --external:@opencode/plugin/tui --external:solid-js --external:'solid-js/*' \
-  --external:'@opentui/*' --outfile=dist/tui.js
+npm install
+npm run build          # tui.js (esbuild) + gui-experimental.cjs (vite)
 ```
 
-After changing either part, run `/reload` in the TUI (or restart it) so the
-client re-reads its plugin list; the server part alone hot-reloads on config
-saves. `opencode plugin list` should show `assistant-voice local
-…/opencode-audio-tool/plugin`.
+Sources live in `src/` (`tui.tsx`, `gui.tsx`); the built files at the root are
+what OpenCode loads, so rebuild after editing and reload the client.
+
+The GUI part contributes:
+
+- a **Voice** group in the desktop command palette and the composer `/` menu
+  (`/voice` with `open`, `status`, `mute|unmute [session|project|global]`);
+- an **Audio** tab in a session's side panel (recent replies, duration, age,
+  mute toggles);
+- an **Audio** launcher on the side panel's New tab page;
+- RPC (`./rpc`) so the window can read state and toggle mutes without touching
+  the filesystem.
+
+A server-side `/voice` command is registered too, so the command exists even if
+the client-side parts are disabled.
 
 ## Options
 

@@ -1,14 +1,11 @@
 {
-  "name": "assistant-voice-opencode-plugin",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Local text-to-speech for OpenCode replies through the Piper queue",
   "type": "module",
-  "exports": {
-    ".": "./index.ts",
-    "./tui": "./dist/tui.js"
-  },
   "scripts": {
-    "build": "esbuild tui.tsx --bundle --format=esm --platform=node --target=node20 --external:@opencode/plugin/tui --external:solid-js --external:'solid-js/*' --external:'@opentui/*' --outfile=dist/tui.js"
+    "build": "npm run build:tui && npm run build:gui",
+    "build:tui": "esbuild src/tui.tsx --bundle --format=esm --platform=node --target=node20 --external:@opencode/plugin/tui --external:solid-js --external:'solid-js/*' --external:'@opentui/*' --outfile=tui.js",
+    "build:gui": "vite build"
   },
   "dependencies": {
     "@opencode/plugin": "^2.3.0"
@@ -19,13 +16,18 @@
     "solid-js": ">=1.9.0"
   },
   "devDependencies": {
-    "esbuild": "^0.25.0"
+    "esbuild": "^0.25.0",
+    "solid-js": "^1.9.0",
+    "vite": "^7.0.0",
+    "vite-plugin-solid": "^2.11.0"
   },
   "files": [
     "index.ts",
-    "tui.tsx",
+    "rpc.ts",
     "state.ts",
-    "dist",
+    "tui.js",
+    "gui-experimental.cjs",
+    "src",
     "README.md",
     "PROPOSAL.md"
   ]
