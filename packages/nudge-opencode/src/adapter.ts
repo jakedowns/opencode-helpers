@@ -235,7 +235,10 @@ export function createNudgeAdapter(host: NudgeHost, options: NudgeAdapterOptions
         delete session.standing;
         return true;
       });
-      if (cleared) await host.removeContext(sessionID, standingKey);
+      if (cleared) {
+        host.log?.({ event: "nudge-clear", sessionID, producer: producer ?? null });
+        await host.removeContext(sessionID, standingKey);
+      }
     },
 
     async touch(sessionID) {
@@ -245,6 +248,7 @@ export function createNudgeAdapter(host: NudgeHost, options: NudgeAdapterOptions
         session.lastProgressAt = at;
         session.fires = 0;
       });
+      host.log?.({ event: "nudge-touch", sessionID });
     },
 
     async mute(sessionID, minutes) {
@@ -253,6 +257,7 @@ export function createNudgeAdapter(host: NudgeHost, options: NudgeAdapterOptions
         const session = (state.sessions[sessionID] ??= emptySession());
         session.mutedUntil = now() + clamped * 60_000;
       });
+      host.log?.({ event: "nudge-mute", sessionID, minutes: clamped });
     },
 
     async unmute(sessionID) {
@@ -260,6 +265,7 @@ export function createNudgeAdapter(host: NudgeHost, options: NudgeAdapterOptions
         const session = (state.sessions[sessionID] ??= emptySession());
         session.mutedUntil = 0;
       });
+      host.log?.({ event: "nudge-unmute", sessionID });
     },
 
     async reset(sessionID) {
@@ -269,6 +275,7 @@ export function createNudgeAdapter(host: NudgeHost, options: NudgeAdapterOptions
         session.lastReminderAt = 0;
         delete session.standing;
       });
+      host.log?.({ event: "nudge-reset", sessionID });
     },
 
     status(sessionID): NudgeAdapterStatus {
