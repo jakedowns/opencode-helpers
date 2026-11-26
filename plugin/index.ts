@@ -337,6 +337,88 @@ function recordIndex(root: string, entry: IndexEntry): void {
  * that file. `say` alone would move the item into played/ and leave the caller
  * with a path that stops resolving.
  */
+function assistantText(message: any): string {
+  const parts = message?.content ?? message?.parts ?? []
+  if (!Array.isArray(parts)) return ""
+  return parts
+    .filter((part: any) => part?.type === "text")
+    .map((part: any) => String(part.text ?? ""))
+    .join("\n")
+    .trim()
+}
+
+function pickLastAssistant(messages: any[]): { id: string; text: string } | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (message?.type !== "assistant") continue
+    const text = assistantText(message)
+    if (text) return { id: message.id, text }
+  }
+  return null
+}
+
+async function lastAssistantText(
+  ctx: { session: { context: (input: { sessionID: string }) => Promise<any> } },
+  sessionID: string,
+): Promise<string | null> {
+  try {
+    const messages = await ctx.session.context({ sessionID })
+    return pickLastAssistant(messages as any[])?.text ?? null
+  } catch {
+    return null
+  }
+}
+
+async function speakLastReply(
+  ctx: any,
+  root: string,
+  location: string,
+  sessionID: string,
+): Promise<SpeakResult | null> {
+  const text = await lastAssistantText(ctx, sessionID)
+  if (!text) return null
+  const cleaned = sanitise(text) || "The previous reply was all code, so there is nothing to read aloud."
+  const result = await speakDurable(root, location, cleaned, { sessionID })
+  recordIndex(root, {
+    path: String(result.path),
+    seconds: result.seconds,
+    at: Date.now(),
+    via: result.via,
+    session: result.title ?? undefined,
+  })
+  return result
+}
+
+async function speakSummary(
+  ctx: any,
+  root: string,
+  location: string,
+  sessionID: string,
+): Promise<SpeakResult | null> {
+  const prompt =
+    "In at most 70 words, state where this session stands: what is done, what is next. " +
+    "Plain spoken prose. No markdown, lists, code, paths or URLs."
+  let text = ""
+  try {
+    const generated = await ctx.session.generate({ sessionID, prompt })
+    text = String((generated as { text?: string })?.text ?? "")
+  } catch (error) {
+    log("summary generation failed", String(error))
+    return null
+  }
+  const cleaned = sanitise(text)
+  if (!cleaned) return null
+  const result = await speakDurable(root, location, cleaned, { sessionID })
+  recordIndex(root, {
+    path: String(result.path),
+    seconds: result.seconds,
+    at: Date.now(),
+    via: result.via,
+    session: result.title ?? undefined,
+  })
+  return result
+}
+
 /** Delete one indexed reply from disk and from the index. Only paths the index
  * knows about can be removed, and both format variants of the basename go. */
 function removeEntry(root: string, target: string): boolean {
@@ -925,6 +1007,14 @@ export default Plugin.define({
               setSidebar(root, scope !== "off")
               return
             }
+            if ((verb === "repeat" || verb === "last") && sessionID) {
+              void speakLastReply(ctx, root, location, sessionID)
+              return
+            }
+            if ((verb === "summary" || verb === "summarize") && sessionID) {
+              void speakSummary(ctx, root, location, sessionID)
+              return
+            }
             if (verb === "purge") {
               const days = parts[1] !== undefined ? Number(parts[1]) : undefined
               void purgeGenerated(root, location, Number.isFinite(days) ? Number(days) : undefined)
@@ -968,6 +1058,18 @@ export default Plugin.define({
             }
           }
           return await voiceState(root, args.directory ?? location, args.sessionID, mode)
+        },
+        repeat: async (input: unknown) => {
+          const args = (input ?? {}) as { directory?: string; sessionID?: string }
+          const dir = args.directory ?? location
+          if (args.sessionID) await speakLastReply(ctx, root, dir, args.sessionID)
+          return await voiceState(root, dir, args.sessionID, mode)
+        },
+        summary: async (input: unknown) => {
+          const args = (input ?? {}) as { directory?: string; sessionID?: string }
+          const dir = args.directory ?? location
+          if (args.sessionID) await speakSummary(ctx, root, dir, args.sessionID)
+          return await voiceState(root, dir, args.sessionID, mode)
         },
         purge: async (input: unknown) => {
           const args = (input ?? {}) as { directory?: string; sessionID?: string; days?: number }
@@ -1138,13 +1240,9 @@ export default Plugin.define({
             return
           }
           const messages = await ctx.session.context({ sessionID: event.sessionID })
-          const last = [...messages].reverse().find((message) => message.type === "assistant")
+          const last = pickLastAssistant(messages as any[])
           if (!last || spoken.has(last.id)) return
-          const text = (last.content ?? [])
-            .filter((part) => part.type === "text")
-            .map((part) => part.text ?? "")
-            .join("\n")
-          const cleaned = sanitise(text)
+          const cleaned = sanitise(last.text)
           if (cleaned.length > maxChars) {
             log(`skip ${last.id}: ${cleaned.length} chars over ${maxChars}`)
             return

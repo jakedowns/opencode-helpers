@@ -83,6 +83,19 @@ export default Plugin.define({
         return ctx.ui.toast.show({ message: `voice: ${statusLine()}`, variant: "info" })
       }
       if (verb === "sidebar") return toggleSidebar()
+      if ((verb === "repeat" || verb === "last" || verb === "summary" || verb === "summarize") && currentSession()) {
+        const sessionID = currentSession() as string
+        const call =
+          verb === "repeat" || verb === "last"
+            ? ctx.client.rpc(Voice).repeat({ directory: location, sessionID })
+            : ctx.client.rpc(Voice).summary({ directory: location, sessionID })
+        ctx.ui.toast.show({
+          message: verb === "summary" || verb === "summarize" ? "voice: summarising…" : "voice: replaying previous reply…",
+          variant: "info",
+        })
+        void call.catch(() => {})
+        return
+      }
       if (verb === "purge") {
         const days = args[1] !== undefined ? Number(args[1]) : 0
         void purge(Number.isFinite(days) ? days : 0)
@@ -105,7 +118,7 @@ export default Plugin.define({
         return toggle(scope)
       }
       return ctx.ui.toast.show({
-        message: "voice: /voice [open|status|mute|unmute|toggle|sidebar|purge] [session|project|global|days]",
+        message: "voice: /voice [open|status|mute|unmute|toggle|sidebar|repeat|summary|purge]",
         variant: "warning",
       })
     }
@@ -230,6 +243,20 @@ export default Plugin.define({
             group: "Voice",
             palette: true,
             run: () => toggle("global"),
+          },
+          {
+            id: "assistant-voice.repeat",
+            title: "Voice: speak previous reply",
+            group: "Voice",
+            palette: true,
+            run: () => runVoiceCommand("repeat"),
+          },
+          {
+            id: "assistant-voice.summary",
+            title: "Voice: summarize where we're at",
+            group: "Voice",
+            palette: true,
+            run: () => runVoiceCommand("summary"),
           },
           {
             id: "assistant-voice.purge",

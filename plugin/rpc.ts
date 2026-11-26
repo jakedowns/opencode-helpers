@@ -123,6 +123,24 @@ export const Voice = Rpc.define({
       },
       output: state,
     },
+    repeat: {
+      input: {
+        type: "object",
+        properties: location,
+        required: ["directory", "sessionID"],
+        additionalProperties: false,
+      },
+      output: state,
+    },
+    summary: {
+      input: {
+        type: "object",
+        properties: location,
+        required: ["directory", "sessionID"],
+        additionalProperties: false,
+      },
+      output: state,
+    },
     remove: {
       input: {
         type: "object",

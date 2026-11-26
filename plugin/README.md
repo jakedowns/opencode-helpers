@@ -151,6 +151,8 @@ The palette group and the slash command share one dispatcher:
 | `/voice unmute [scope]` | unmute that scope |
 | `/voice toggle [scope]` | flip that scope |
 | `/voice sidebar` | show or hide the sidebar section |
+| `/voice repeat` (alias `last`) | speak the most recent text reply again |
+| `/voice summary` (alias `summarize`) | ask the model for a 70-word status and speak it |
 - Daemon: if the socket is missing, `setup` starts `piperd.py --serve --drain`
   once, guarded by `<queue>/.voice-plugin.pid` created with `O_EXCL`, retrying
   on a 1 s / 5 s / 30 s backoff. A stale pid file is replaced only after its

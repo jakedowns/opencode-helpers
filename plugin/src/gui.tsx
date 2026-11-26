@@ -297,6 +297,20 @@ export default Plugin.define({
       const session = current()
       if (!session) return
       if (verb === "status") return openTool()
+      if (verb === "repeat" || verb === "last") {
+        void ctx.client
+          .rpc(Voice)
+          .repeat({ directory: session.directory, sessionID: session.id })
+          .catch(() => {})
+        return
+      }
+      if (verb === "summary" || verb === "summarize") {
+        void ctx.client
+          .rpc(Voice)
+          .summary({ directory: session.directory, sessionID: session.id })
+          .catch(() => {})
+        return
+      }
       if (verb === "purge") {
         const days = parts[1] !== undefined ? Number(parts[1]) : 0
         void ctx.client
@@ -328,6 +342,28 @@ export default Plugin.define({
         slash: { name: "voice", arguments: true },
         featured: true,
         run: (input) => runCommand(input),
+      }),
+    )
+
+    ctx.add(
+      Command,
+      (): Command => ({
+        id: "repeat",
+        title: "Voice: speak previous reply",
+        group: "Voice",
+        keywords: "again replay last read aloud",
+        run: () => runCommand("repeat"),
+      }),
+    )
+
+    ctx.add(
+      Command,
+      (): Command => ({
+        id: "summary",
+        title: "Voice: summarize where we're at",
+        group: "Voice",
+        keywords: "status recap progress spoken",
+        run: () => runCommand("summary"),
       }),
     )
 

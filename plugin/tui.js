@@ -1,3 +1,9 @@
+var __defProp = Object.defineProperty;
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
+
 // src/tui.tsx
 import { readFileSync as readFileSync2 } from "node:fs";
 import path2 from "node:path";
@@ -52,42 +58,223 @@ function readState(root) {
     return EMPTY;
   }
 }
-function writeState(root, state) {
+function writeState(root, state2) {
   const file = statePath(root);
   const tmp = `${file}.part`;
-  writeFileSync(tmp, `${JSON.stringify(state, null, 2)}
+  writeFileSync(tmp, `${JSON.stringify(state2, null, 2)}
 `);
   renameSync(tmp, file);
-  return state;
+  return state2;
 }
-function resolveMutes(state, location, sessionID) {
+function resolveMutes(state2, location2, sessionID) {
   return {
-    global: state.global,
-    project: state.projects[location] === true,
-    session: sessionID ? state.sessions[sessionID] === true : false
+    global: state2.global,
+    project: state2.projects[location2] === true,
+    session: sessionID ? state2.sessions[sessionID] === true : false
   };
 }
-function setMute(root, scope, location, sessionID, value) {
-  const state = readState(root);
-  if (scope === "global") state.global = value;
-  else if (scope === "project") state.projects[location] = value;
-  else if (sessionID) state.sessions[sessionID] = value;
-  writeState(root, state);
-  const mutes = resolveMutes(state, location, sessionID);
-  return { state, mutes, effective: mutes.global || mutes.project || mutes.session };
+function setMute(root, scope, location2, sessionID, value) {
+  const state2 = readState(root);
+  if (scope === "global") state2.global = value;
+  else if (scope === "project") state2.projects[location2] = value;
+  else if (sessionID) state2.sessions[sessionID] = value;
+  writeState(root, state2);
+  const mutes2 = resolveMutes(state2, location2, sessionID);
+  return { state: state2, mutes: mutes2, effective: mutes2.global || mutes2.project || mutes2.session };
 }
 function setSidebar(root, visible) {
-  const state = readState(root);
-  state.sidebar = visible;
-  return writeState(root, state);
+  const state2 = readState(root);
+  state2.sidebar = visible;
+  return writeState(root, state2);
 }
+
+// node_modules/@opencode/schema/dist/rpc.js
+var rpc_exports = {};
+__export(rpc_exports, {
+  Rpc: () => rpc_exports,
+  define: () => define
+});
+function define(definition) {
+  const reserved = Object.values(definition.methods).flatMap((method) => Object.keys(method.errors ?? {})).find((name) => name.startsWith("rpc."));
+  if (reserved)
+    throw new Error(`RPC error names starting with "rpc." are reserved: ${reserved}`);
+  return definition;
+}
+
+// rpc.ts
+var entry = {
+  type: "object",
+  properties: {
+    path: { type: "string" },
+    seconds: { type: "number" },
+    at: { type: "number" },
+    session: { type: "string" }
+  },
+  required: ["path", "at"],
+  additionalProperties: false
+};
+var mutes = {
+  type: "object",
+  properties: {
+    session: { type: "boolean" },
+    project: { type: "boolean" },
+    global: { type: "boolean" }
+  },
+  required: ["session", "project", "global"],
+  additionalProperties: false
+};
+var state = {
+  type: "object",
+  properties: {
+    entries: { type: "array", items: entry },
+    mutes,
+    sidebar: { type: "boolean" },
+    mode: { type: "string", enum: ["host", "client", "remote"] },
+    queue: {
+      type: "object",
+      properties: {
+        queued: { type: "number" },
+        playing: { type: "number" },
+        failed: { type: "number" },
+        playingSession: { type: "string" }
+      },
+      required: ["queued", "playing", "failed"],
+      additionalProperties: false
+    },
+    audio: {
+      type: "object",
+      properties: {
+        at: { type: "number" },
+        available: { type: "boolean" },
+        muted: { type: "boolean" },
+        volume: { type: "number" }
+      },
+      required: ["at", "available", "muted", "volume"],
+      additionalProperties: false
+    },
+    cache: {
+      type: "object",
+      properties: {
+        at: { type: "number" },
+        files: { type: "number" },
+        bytes: { type: "number" }
+      },
+      required: ["at", "files", "bytes"],
+      additionalProperties: false
+    },
+    lastAttempt: {
+      type: "object",
+      properties: {
+        at: { type: "number" },
+        removed: { type: "number" },
+        bytes: { type: "number" }
+      },
+      required: ["at", "removed", "bytes"],
+      additionalProperties: false
+    },
+    lastPurge: {
+      type: "object",
+      properties: {
+        at: { type: "number" },
+        removed: { type: "number" },
+        bytes: { type: "number" }
+      },
+      required: ["at", "removed", "bytes"],
+      additionalProperties: false
+    }
+  },
+  required: ["entries", "mutes", "sidebar", "mode"],
+  additionalProperties: false
+};
+var location = {
+  directory: { type: "string" },
+  sessionID: { type: "string" }
+};
+var Voice = rpc_exports.define({
+  id: "assistant-voice",
+  methods: {
+    state: {
+      input: {
+        type: "object",
+        properties: location,
+        required: ["directory"],
+        additionalProperties: false
+      },
+      output: state
+    },
+    setMute: {
+      input: {
+        type: "object",
+        properties: {
+          ...location,
+          scope: { type: "string", enum: ["session", "project", "global"] },
+          value: { type: "boolean" }
+        },
+        required: ["directory", "scope", "value"],
+        additionalProperties: false
+      },
+      output: state
+    },
+    repeat: {
+      input: {
+        type: "object",
+        properties: location,
+        required: ["directory", "sessionID"],
+        additionalProperties: false
+      },
+      output: state
+    },
+    summary: {
+      input: {
+        type: "object",
+        properties: location,
+        required: ["directory", "sessionID"],
+        additionalProperties: false
+      },
+      output: state
+    },
+    remove: {
+      input: {
+        type: "object",
+        properties: {
+          ...location,
+          path: { type: "string" }
+        },
+        required: ["directory", "path"],
+        additionalProperties: false
+      },
+      output: state
+    },
+    purge: {
+      input: {
+        type: "object",
+        properties: {
+          ...location,
+          days: { type: "number" }
+        },
+        required: ["directory"],
+        additionalProperties: false
+      },
+      output: state
+    },
+    setSidebar: {
+      input: {
+        type: "object",
+        properties: { visible: { type: "boolean" } },
+        required: ["visible"],
+        additionalProperties: false
+      },
+      output: state
+    }
+  }
+});
 
 // src/tui.tsx
 function readIndex(root, limit = 4) {
   try {
     const parsed = JSON.parse(readFileSync2(path2.join(root, ".voice-index.json"), "utf8"));
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter((entry) => entry && typeof entry.path === "string").slice(0, limit);
+    return parsed.filter((entry2) => entry2 && typeof entry2.path === "string").slice(0, limit);
   } catch {
     return [];
   }
@@ -98,10 +285,10 @@ function formatBytes(bytes) {
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
-function entryLabel(entry) {
-  const name = path2.basename(entry.path);
-  if (!entry.session) return name;
-  const title = entry.session.length > 10 ? `${entry.session.slice(0, 9)}\u2026` : entry.session;
+function entryLabel(entry2) {
+  const name = path2.basename(entry2.path);
+  if (!entry2.session) return name;
+  const title = entry2.session.length > 10 ? `${entry2.session.slice(0, 9)}\u2026` : entry2.session;
   return `${title} ${name}`;
 }
 function age(at) {
@@ -114,7 +301,7 @@ var tui_default = Plugin.define({
   id: "assistant-voice.tui",
   setup(ctx) {
     const root = String(ctx.options?.root ?? "/media/share/opencode-audio-tool");
-    const location = ctx.location?.directory ?? process.cwd();
+    const location2 = ctx.location?.directory ?? process.cwd();
     const [sidebarVisible, setSidebarVisible] = createSignal(readState(root).sidebar);
     const toggleSidebar = () => {
       const next = !sidebarVisible();
@@ -132,6 +319,17 @@ var tui_default = Plugin.define({
         return ctx.ui.toast.show({ message: `voice: ${statusLine()}`, variant: "info" });
       }
       if (verb === "sidebar") return toggleSidebar();
+      if ((verb === "repeat" || verb === "last" || verb === "summary" || verb === "summarize") && currentSession()) {
+        const sessionID = currentSession();
+        const call = verb === "repeat" || verb === "last" ? ctx.client.rpc(Voice).repeat({ directory: location2, sessionID }) : ctx.client.rpc(Voice).summary({ directory: location2, sessionID });
+        ctx.ui.toast.show({
+          message: verb === "summary" || verb === "summarize" ? "voice: summarising\u2026" : "voice: replaying previous reply\u2026",
+          variant: "info"
+        });
+        void call.catch(() => {
+        });
+        return;
+      }
       if (verb === "purge") {
         const days = args[1] !== void 0 ? Number(args[1]) : 0;
         void purge(Number.isFinite(days) ? days : 0);
@@ -141,7 +339,7 @@ var tui_default = Plugin.define({
         if (!validScope) {
           return ctx.ui.toast.show({ message: "voice: scope must be session, project, or global", variant: "warning" });
         }
-        const result = setMute(root, scope, location, currentSession(), verb === "mute");
+        const result = setMute(root, scope, location2, currentSession(), verb === "mute");
         return ctx.ui.toast.show({
           message: `voice: ${scope} auto-speak ${result.effective ? "muted" : "on"}`,
           variant: "info"
@@ -154,7 +352,7 @@ var tui_default = Plugin.define({
         return toggle(scope);
       }
       return ctx.ui.toast.show({
-        message: "voice: /voice [open|status|mute|unmute|toggle|sidebar|purge] [session|project|global|days]",
+        message: "voice: /voice [open|status|mute|unmute|toggle|sidebar|repeat|summary|purge]",
         variant: "warning"
       });
     };
@@ -162,13 +360,13 @@ var tui_default = Plugin.define({
       const route = ctx.ui.router.current();
       return route?.type === "session" ? route.sessionID : void 0;
     };
-    const mutes = () => resolveMutes(readState(root), location, currentSession());
+    const mutes2 = () => resolveMutes(readState(root), location2, currentSession());
     const toggle = (scope) => {
       const current = (() => {
-        const state = mutes();
-        return scope === "global" ? state.global : scope === "project" ? state.project : state.session;
+        const state2 = mutes2();
+        return scope === "global" ? state2.global : scope === "project" ? state2.project : state2.session;
       })();
-      const result = setMute(root, scope, location, currentSession(), !current);
+      const result = setMute(root, scope, location2, currentSession(), !current);
       ctx.ui.toast.show({
         message: `voice: ${scope} auto-speak ${result.effective ? "muted" : "on"}`,
         variant: "info"
@@ -178,9 +376,9 @@ var tui_default = Plugin.define({
       void ctx.ui.router.navigate({ type: "plugin", name: "voice" });
     };
     const statusLine = () => {
-      const state = mutes();
+      const state2 = mutes2();
       const label = (value) => value ? "muted" : "on";
-      return `session ${label(state.session)} \xB7 project ${label(state.project)} \xB7 global ${label(state.global)}`;
+      return `session ${label(state2.session)} \xB7 project ${label(state2.project)} \xB7 global ${label(state2.global)}`;
     };
     const AudioToolPage = () => {
       const entries = readIndex(root, 12);
@@ -188,7 +386,7 @@ var tui_default = Plugin.define({
       const cache = stored.cache;
       const queue = stored.queue;
       const audio = stored.audio;
-      return /* @__PURE__ */ React.createElement("box", { flexDirection: "column", padding: 1, gap: 1 }, /* @__PURE__ */ React.createElement("text", null, "Audio tool"), /* @__PURE__ */ React.createElement("text", null, statusLine()), cache ? /* @__PURE__ */ React.createElement("text", null, `cache ${formatBytes(cache.bytes)} \xB7 ${cache.files} file${cache.files === 1 ? "" : "s"}`) : null, queue ? /* @__PURE__ */ React.createElement("text", null, `queue ${queue.queued} \xB7 playing ${queue.playing}${queue.playingSession ? ` (${queue.playingSession})` : ""}`) : null, audio ? /* @__PURE__ */ React.createElement("text", null, `output ${audio.available ? audio.muted ? "MUTED" : `${Math.round(audio.volume * 100)}%` : "host"}`) : null, /* @__PURE__ */ React.createElement("box", { flexDirection: "column" }, /* @__PURE__ */ React.createElement("text", null, "Recent"), entries.length === 0 ? /* @__PURE__ */ React.createElement("text", null, "  nothing yet") : entries.map((entry) => /* @__PURE__ */ React.createElement("text", null, `  ${entryLabel(entry)}  ${entry.seconds ? `${entry.seconds}s` : ""}  ${age(entry.at)}`))), /* @__PURE__ */ React.createElement("box", { flexDirection: "column" }, /* @__PURE__ */ React.createElement("text", null, "Mute"), /* @__PURE__ */ React.createElement("box", { onMouseDown: () => toggle("session") }, /* @__PURE__ */ React.createElement("text", null, `  [${mutes().session ? "x" : " "}] this session`)), /* @__PURE__ */ React.createElement("box", { onMouseDown: () => toggle("project") }, /* @__PURE__ */ React.createElement("text", null, `  [${mutes().project ? "x" : " "}] this project`)), /* @__PURE__ */ React.createElement("box", { onMouseDown: () => toggle("global") }, /* @__PURE__ */ React.createElement("text", null, `  [${mutes().global ? "x" : " "}] everywhere`))), /* @__PURE__ */ React.createElement("text", null, "esc to go back \xB7 palette: Voice"));
+      return /* @__PURE__ */ React.createElement("box", { flexDirection: "column", padding: 1, gap: 1 }, /* @__PURE__ */ React.createElement("text", null, "Audio tool"), /* @__PURE__ */ React.createElement("text", null, statusLine()), cache ? /* @__PURE__ */ React.createElement("text", null, `cache ${formatBytes(cache.bytes)} \xB7 ${cache.files} file${cache.files === 1 ? "" : "s"}`) : null, queue ? /* @__PURE__ */ React.createElement("text", null, `queue ${queue.queued} \xB7 playing ${queue.playing}${queue.playingSession ? ` (${queue.playingSession})` : ""}`) : null, audio ? /* @__PURE__ */ React.createElement("text", null, `output ${audio.available ? audio.muted ? "MUTED" : `${Math.round(audio.volume * 100)}%` : "host"}`) : null, /* @__PURE__ */ React.createElement("box", { flexDirection: "column" }, /* @__PURE__ */ React.createElement("text", null, "Recent"), entries.length === 0 ? /* @__PURE__ */ React.createElement("text", null, "  nothing yet") : entries.map((entry2) => /* @__PURE__ */ React.createElement("text", null, `  ${entryLabel(entry2)}  ${entry2.seconds ? `${entry2.seconds}s` : ""}  ${age(entry2.at)}`))), /* @__PURE__ */ React.createElement("box", { flexDirection: "column" }, /* @__PURE__ */ React.createElement("text", null, "Mute"), /* @__PURE__ */ React.createElement("box", { onMouseDown: () => toggle("session") }, /* @__PURE__ */ React.createElement("text", null, `  [${mutes2().session ? "x" : " "}] this session`)), /* @__PURE__ */ React.createElement("box", { onMouseDown: () => toggle("project") }, /* @__PURE__ */ React.createElement("text", null, `  [${mutes2().project ? "x" : " "}] this project`)), /* @__PURE__ */ React.createElement("box", { onMouseDown: () => toggle("global") }, /* @__PURE__ */ React.createElement("text", null, `  [${mutes2().global ? "x" : " "}] everywhere`))), /* @__PURE__ */ React.createElement("text", null, "esc to go back \xB7 palette: Voice"));
     };
     let disposeRoute;
     try {
@@ -237,6 +435,20 @@ var tui_default = Plugin.define({
             run: () => toggle("global")
           },
           {
+            id: "assistant-voice.repeat",
+            title: "Voice: speak previous reply",
+            group: "Voice",
+            palette: true,
+            run: () => runVoiceCommand("repeat")
+          },
+          {
+            id: "assistant-voice.summary",
+            title: "Voice: summarize where we're at",
+            group: "Voice",
+            palette: true,
+            run: () => runVoiceCommand("summary")
+          },
+          {
             id: "assistant-voice.purge",
             title: "Voice: purge generated audio",
             group: "Voice",
@@ -267,7 +479,7 @@ var tui_default = Plugin.define({
           const cache = stored.cache;
           const queue = stored.queue;
           const audio = stored.audio;
-          return /* @__PURE__ */ React.createElement("box", { flexDirection: "column" }, /* @__PURE__ */ React.createElement("box", { onMouseDown: openAudioTool }, /* @__PURE__ */ React.createElement("text", null, "\u{1F399} voice \xB7 open audio tool")), entries.map((entry) => /* @__PURE__ */ React.createElement("text", null, `  ${entryLabel(entry)}  ${entry.seconds ? `${entry.seconds}s` : ""}  ${age(entry.at)}`)), cache ? /* @__PURE__ */ React.createElement("text", null, `  cache ${formatBytes(cache.bytes)} \xB7 ${cache.files} file${cache.files === 1 ? "" : "s"}`) : null, queue ? /* @__PURE__ */ React.createElement("text", null, `  queue ${queue.queued} \xB7 playing ${queue.playing}${queue.playingSession ? ` (${queue.playingSession})` : ""}`) : null, audio ? /* @__PURE__ */ React.createElement("text", null, `  output ${audio.available ? audio.muted ? "MUTED" : `${Math.round(audio.volume * 100)}%` : "host"}`) : null);
+          return /* @__PURE__ */ React.createElement("box", { flexDirection: "column" }, /* @__PURE__ */ React.createElement("box", { onMouseDown: openAudioTool }, /* @__PURE__ */ React.createElement("text", null, "\u{1F399} voice \xB7 open audio tool")), entries.map((entry2) => /* @__PURE__ */ React.createElement("text", null, `  ${entryLabel(entry2)}  ${entry2.seconds ? `${entry2.seconds}s` : ""}  ${age(entry2.at)}`)), cache ? /* @__PURE__ */ React.createElement("text", null, `  cache ${formatBytes(cache.bytes)} \xB7 ${cache.files} file${cache.files === 1 ? "" : "s"}`) : null, queue ? /* @__PURE__ */ React.createElement("text", null, `  queue ${queue.queued} \xB7 playing ${queue.playing}${queue.playingSession ? ` (${queue.playingSession})` : ""}`) : null, audio ? /* @__PURE__ */ React.createElement("text", null, `  output ${audio.available ? audio.muted ? "MUTED" : `${Math.round(audio.volume * 100)}%` : "host"}`) : null);
         }
       });
       if (typeof slot === "function") disposers.push(slot);
