@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "capturedAt": "2026-11-26T14:30:00Z",
+  "source": "progress plugin 2.27.0",
+  "defaults": {
+    "strictMode": "nudge",
+    "strictThresholdSteps": 3,
+    "strictStaleAfterMs": 300000,
+    "strictCooldownMs": 120000,
+    "strictEscalateAfter": 3,
+    "wallClockMs": 600000,
+    "wallMaxStreak": 3,
+    "idleCooldownMs": 120000,
+    "idleMaxPerRun": 3,
+    "idleStaleMs": 600000,
+    "idleErrorGraceMs": 3600000,
+    "nudgeGapMs": 60000,
+    "nudgeGraceMs": 600000,
+    "nudgeCapPerSession": 2,
+    "sayNudgeCooldownMs": 120000,
+    "sayNudgeMaxPerTurn": 1,
+    "customRuleCooldownMs": 120000,
+    "customRuleTtlMs": 3600000
+  },
+  "messages": {
+    "silentRun": "[warn] {count} step(s) with no progress entry{target}. Next: start or update the tree.",
+    "staleProgress": "[warn] {count} step(s) without a progress change{target}. Next: update detail/progress or close it.",
+    "staleEscalation": "[block] progress reminder #{n}: tree unchanged after {count} steps{target}. Update or close it now.",
+    "relayPattern": "Repeating long command ({count}\u00d7): {pattern}. Next time wrap it: progress-relay --id <id> -- {command} (or pipe it).",
+    "idle": "[block] turn ending with {count} stale/error own task(s): {targets}{excluded}. Close or continue.",
+    "wall": "[warn] no progress for {age}{target}. Next: update detail/progress or close it; wrap long commands in the relay.",
+    "sayLongTool": "That {tool} call ran {seconds}s with no narration this turn. Before the next long-running step, post a say with what it is doing and a rough ETA.",
+    "saySilentRun": "That was tool call {count} in a row this turn with no say note. Before the next step, post a say with what you are doing and a rough ETA."
+  },
+  "delivery": {
+    "standingKey": "nudge",
+    "legacyKey": "progress-reminder",
+    "syntheticOnlyFor": "block",
+    "nonBlockGapBypass": false,
+    "blockBypassesGapAndMute": true
+  }
+}
