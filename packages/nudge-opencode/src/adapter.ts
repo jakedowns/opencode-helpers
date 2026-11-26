@@ -192,6 +192,16 @@ export function createNudgeAdapter(host: NudgeHost, options: NudgeAdapterOptions
         host.log?.({ event: "nudge", sessionID: candidate.sessionId, producer: candidate.producer, reason: outcome.reason });
         return outcome;
       }
+      if (options.shadow) {
+        host.log?.({
+          event: "nudge-shadow",
+          sessionID: candidate.sessionId,
+          producer: candidate.producer,
+          severity,
+          text: outcome.text ?? text,
+        });
+        return outcome;
+      }
 
       await host.putContext(
         candidate.sessionId,

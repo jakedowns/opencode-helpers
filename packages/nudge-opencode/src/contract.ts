@@ -33,6 +33,8 @@ export interface NudgeAdapterOptions {
   graceMs?: number;
   capPerSession?: number;
   wordingVariation?: NudgeProducerConfig["wordingVariation"];
+  /** Gate and record, but do not touch host context/synthetic. */
+  shadow?: boolean;
 }
 
 export interface NudgeAdapterStatus {

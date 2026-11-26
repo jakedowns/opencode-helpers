@@ -45,6 +45,8 @@ export interface AttachNudgeOptions {
   capPerSession?: number;
   tickMs?: number;
   toolName?: string;
+  registerTool?: boolean;
+  shadow?: boolean;
   log?: (event: Record<string, unknown>) => void;
 }
 
@@ -85,6 +87,7 @@ export async function attachNudge(
       gapMs: options.gapMs ?? defaults.gapMs,
       graceMs: options.graceMs ?? defaults.graceMs,
       capPerSession: options.capPerSession ?? defaults.capPerSession,
+      shadow: options.shadow,
     }
   );
 
@@ -135,7 +138,7 @@ export async function attachNudge(
   }
 
   // One nudge tool, first loader wins.
-  try {
+  if (options.registerTool !== false) try {
     const taken = new Set((await ctx.tool.list()).map((tool) => tool.id));
     const name = options.toolName ?? "nudge";
     if (!taken.has(name)) {

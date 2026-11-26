@@ -194,3 +194,18 @@ test('clear only removes the matching producer source', async () => {
     h.cleanup();
   }
 });
+
+test('shadow mode records the gate decision but never writes the host', async () => {
+  const h = harness({ shadow: true });
+  try {
+    const result = await h.adapter.submit(candidate());
+    assert.equal(result.applied, true);
+    assert.equal(h.puts.length, 0);
+    assert.equal(h.removes.length, 0);
+    assert.equal(h.synthetics.length, 0);
+    assert.ok(h.adapter.status('ses_a').standing);
+    assert.ok(h.logs.some((event) => event.event === 'nudge-shadow'));
+  } finally {
+    h.cleanup();
+  }
+});
