@@ -1,14 +1,36 @@
 # assistant-voice-opencode-plugin
 
+[![npm version](https://img.shields.io/npm/v/@jakedowns/assistant-voice-opencode-plugin.svg)](https://www.npmjs.com/package/@jakedowns/assistant-voice-opencode-plugin)
+
+Published as [`@jakedowns/assistant-voice-opencode-plugin`](https://www.npmjs.com/package/@jakedowns/assistant-voice-opencode-plugin)
+on npm.
+
 Local text-to-speech for OpenCode, built on `audioq.py`. v0.0.1 is a **stub**:
 the tool and the TUI surface exist, but the sanitiser, mutes, and queue paths
 still need tests before the label changes.
 
 Design and decisions: [`PROPOSAL.md`](./PROPOSAL.md).
 
+## Install
+
+From npm:
+
+```sh
+opencode plugin add @jakedowns/assistant-voice-opencode-plugin
+# or pin it yourself: npm install @jakedowns/assistant-voice-opencode-plugin
+```
+
+Then add it to the **global** config (`~/.config/opencode/opencode.json`), with
+the same `options`:
+```jsonc
+{
+  "plugins": [{ "package": "@jakedowns/assistant-voice-opencode-plugin", "options": { "auto": true } }]
+}
+```
+
 ## Load it locally
 
-Add the package to the **global** config (`~/.config/opencode/opencode.json`):
+For development, point at the checkout instead of the registry:
 
 ```jsonc
 {

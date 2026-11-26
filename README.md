@@ -11,7 +11,7 @@ until the maintainer confirms.
 |---|---|
 | `@jakedowns/opencode-nudge-core` | Pure nudge policy, rules, matcher, scheduler, wording pools |
 | `@jakedowns/opencode-nudge` | OpenCode host adapter: hooks, shared state, one `nudge` key/tool |
-| `assistant-voice-opencode-plugin` | Local Piper TTS: voice tools, auto-speak, GUI/TUI panels, host/client modes |
+| `@jakedowns/assistant-voice-opencode-plugin` | Local Piper TTS: voice tools, auto-speak, GUI/TUI panels, host/client modes |
 
 Consumers: `@jakedowns/progress-tool-opencode-plugin`, the voice plugin
 (`packages/audio-tool`, also reachable at `/media/share/opencode-audio-tool` via
