@@ -164,7 +164,7 @@ export default Plugin.define({
         <box flexDirection="column" padding={1} gap={1}>
           <text>Audio tool</text>
           <text>{statusLine()}</text>
-          {cache ? <text>{`cache ${formatBytes(cache.bytes)} · ${cache.files} file${cache.files === 1 ? "" : "s"}`}</text> : null}
+          {cache ? <text>{`cache (all) ${formatBytes(cache.bytes)} · ${cache.files} file${cache.files === 1 ? "" : "s"}`}</text> : null}
           {queue ? (
             <text>{`queue ${queue.queued} · playing ${queue.playing}${generating > 0 ? ` · ${generating} generating` : ""}${queue.playingSession ? ` (${queue.playingSession})` : speaker ? ` · latest: ${speaker}` : ""}`}</text>
           ) : null}
@@ -305,7 +305,7 @@ export default Plugin.define({
                 <text>{`  ${entryLabel(entry)}  ${entry.seconds ? `${entry.seconds}s` : ""}  ${age(entry.at)}`}</text>
               ))}
               {cache ? (
-                <text>{`  cache ${formatBytes(cache.bytes)} · ${cache.files} file${cache.files === 1 ? "" : "s"}`}</text>
+                <text>{`  cache (all) ${formatBytes(cache.bytes)} · ${cache.files} file${cache.files === 1 ? "" : "s"}`}</text>
               ) : null}
               {queue ? (
                 <text>{`  queue ${queue.queued} · playing ${queue.playing}${generating > 0 ? ` · ${generating} generating` : ""}${queue.playingSession ? ` (${queue.playingSession})` : speaker ? ` · latest: ${speaker}` : ""}`}</text>

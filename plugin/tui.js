@@ -11,7 +11,7 @@ import { createSignal } from "solid-js";
 import { Plugin } from "@opencode/plugin/tui";
 
 // state.ts
-import { readFileSync, renameSync, writeFileSync } from "node:fs";
+import { readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 var EMPTY = { global: false, projects: {}, sessions: {}, sidebar: true };
 function statePath(root) {
@@ -62,10 +62,22 @@ function readState(root) {
 }
 function writeState(root, state2) {
   const file = statePath(root);
-  const tmp = `${file}.part`;
-  writeFileSync(tmp, `${JSON.stringify(state2, null, 2)}
-`);
-  renameSync(tmp, file);
+  const tmp = `${file}.${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}.part`;
+  const payload = `${JSON.stringify(state2, null, 2)}
+`;
+  try {
+    writeFileSync(tmp, payload);
+    renameSync(tmp, file);
+  } catch {
+    try {
+      writeFileSync(file, payload);
+    } catch {
+    }
+    try {
+      unlinkSync(tmp);
+    } catch {
+    }
+  }
   return state2;
 }
 function resolveMutes(state2, location2, sessionID) {
@@ -412,7 +424,7 @@ var tui_default = Plugin.define({
       const speaker = stored.lastSpeaker?.session;
       const generating = stored.generating?.count ?? 0;
       const audio = stored.audio;
-      return /* @__PURE__ */ React.createElement("box", { flexDirection: "column", padding: 1, gap: 1 }, /* @__PURE__ */ React.createElement("text", null, "Audio tool"), /* @__PURE__ */ React.createElement("text", null, statusLine()), cache ? /* @__PURE__ */ React.createElement("text", null, `cache ${formatBytes(cache.bytes)} \xB7 ${cache.files} file${cache.files === 1 ? "" : "s"}`) : null, queue ? /* @__PURE__ */ React.createElement("text", null, `queue ${queue.queued} \xB7 playing ${queue.playing}${generating > 0 ? ` \xB7 ${generating} generating` : ""}${queue.playingSession ? ` (${queue.playingSession})` : speaker ? ` \xB7 latest: ${speaker}` : ""}`) : null, audio ? /* @__PURE__ */ React.createElement("text", null, `volume ${audio.available ? audio.muted ? "MUTED" : `${Math.round(audio.volume * 100)}%` : "host"}`) : null, /* @__PURE__ */ React.createElement("box", { flexDirection: "column" }, /* @__PURE__ */ React.createElement("text", null, "Recent"), entries.length === 0 ? /* @__PURE__ */ React.createElement("text", null, "  nothing yet") : entries.map((entry2) => /* @__PURE__ */ React.createElement("text", null, `  ${entryLabel(entry2)}  ${entry2.seconds ? `${entry2.seconds}s` : ""}  ${age(entry2.at)}`))), /* @__PURE__ */ React.createElement("box", { flexDirection: "column" }, /* @__PURE__ */ React.createElement("text", null, "Mute"), /* @__PURE__ */ React.createElement("box", { onMouseDown: () => toggle("session") }, /* @__PURE__ */ React.createElement("text", null, `  [${mutes2().session ? "x" : " "}] this session`)), /* @__PURE__ */ React.createElement("box", { onMouseDown: () => toggle("project") }, /* @__PURE__ */ React.createElement("text", null, `  [${mutes2().project ? "x" : " "}] this project`)), /* @__PURE__ */ React.createElement("box", { onMouseDown: () => toggle("global") }, /* @__PURE__ */ React.createElement("text", null, `  [${mutes2().global ? "x" : " "}] everywhere`))), /* @__PURE__ */ React.createElement("text", null, "esc to go back \xB7 palette: Voice"));
+      return /* @__PURE__ */ React.createElement("box", { flexDirection: "column", padding: 1, gap: 1 }, /* @__PURE__ */ React.createElement("text", null, "Audio tool"), /* @__PURE__ */ React.createElement("text", null, statusLine()), cache ? /* @__PURE__ */ React.createElement("text", null, `cache (all) ${formatBytes(cache.bytes)} \xB7 ${cache.files} file${cache.files === 1 ? "" : "s"}`) : null, queue ? /* @__PURE__ */ React.createElement("text", null, `queue ${queue.queued} \xB7 playing ${queue.playing}${generating > 0 ? ` \xB7 ${generating} generating` : ""}${queue.playingSession ? ` (${queue.playingSession})` : speaker ? ` \xB7 latest: ${speaker}` : ""}`) : null, audio ? /* @__PURE__ */ React.createElement("text", null, `volume ${audio.available ? audio.muted ? "MUTED" : `${Math.round(audio.volume * 100)}%` : "host"}`) : null, /* @__PURE__ */ React.createElement("box", { flexDirection: "column" }, /* @__PURE__ */ React.createElement("text", null, "Recent"), entries.length === 0 ? /* @__PURE__ */ React.createElement("text", null, "  nothing yet") : entries.map((entry2) => /* @__PURE__ */ React.createElement("text", null, `  ${entryLabel(entry2)}  ${entry2.seconds ? `${entry2.seconds}s` : ""}  ${age(entry2.at)}`))), /* @__PURE__ */ React.createElement("box", { flexDirection: "column" }, /* @__PURE__ */ React.createElement("text", null, "Mute"), /* @__PURE__ */ React.createElement("box", { onMouseDown: () => toggle("session") }, /* @__PURE__ */ React.createElement("text", null, `  [${mutes2().session ? "x" : " "}] this session`)), /* @__PURE__ */ React.createElement("box", { onMouseDown: () => toggle("project") }, /* @__PURE__ */ React.createElement("text", null, `  [${mutes2().project ? "x" : " "}] this project`)), /* @__PURE__ */ React.createElement("box", { onMouseDown: () => toggle("global") }, /* @__PURE__ */ React.createElement("text", null, `  [${mutes2().global ? "x" : " "}] everywhere`))), /* @__PURE__ */ React.createElement("text", null, "esc to go back \xB7 palette: Voice"));
     };
     let disposeRoute;
     try {
@@ -507,7 +519,7 @@ var tui_default = Plugin.define({
           const speaker = stored.lastSpeaker?.session;
           const generating = stored.generating?.count ?? 0;
           const audio = stored.audio;
-          return /* @__PURE__ */ React.createElement("box", { flexDirection: "column" }, /* @__PURE__ */ React.createElement("box", { onMouseDown: openAudioTool }, /* @__PURE__ */ React.createElement("text", null, "\u{1F399} voice \xB7 open audio tool")), entries.map((entry2) => /* @__PURE__ */ React.createElement("text", null, `  ${entryLabel(entry2)}  ${entry2.seconds ? `${entry2.seconds}s` : ""}  ${age(entry2.at)}`)), cache ? /* @__PURE__ */ React.createElement("text", null, `  cache ${formatBytes(cache.bytes)} \xB7 ${cache.files} file${cache.files === 1 ? "" : "s"}`) : null, queue ? /* @__PURE__ */ React.createElement("text", null, `  queue ${queue.queued} \xB7 playing ${queue.playing}${generating > 0 ? ` \xB7 ${generating} generating` : ""}${queue.playingSession ? ` (${queue.playingSession})` : speaker ? ` \xB7 latest: ${speaker}` : ""}`) : null, audio ? /* @__PURE__ */ React.createElement("text", null, `  volume ${audio.available ? audio.muted ? "MUTED" : `${Math.round(audio.volume * 100)}%` : "host"}`) : null);
+          return /* @__PURE__ */ React.createElement("box", { flexDirection: "column" }, /* @__PURE__ */ React.createElement("box", { onMouseDown: openAudioTool }, /* @__PURE__ */ React.createElement("text", null, "\u{1F399} voice \xB7 open audio tool")), entries.map((entry2) => /* @__PURE__ */ React.createElement("text", null, `  ${entryLabel(entry2)}  ${entry2.seconds ? `${entry2.seconds}s` : ""}  ${age(entry2.at)}`)), cache ? /* @__PURE__ */ React.createElement("text", null, `  cache (all) ${formatBytes(cache.bytes)} \xB7 ${cache.files} file${cache.files === 1 ? "" : "s"}`) : null, queue ? /* @__PURE__ */ React.createElement("text", null, `  queue ${queue.queued} \xB7 playing ${queue.playing}${generating > 0 ? ` \xB7 ${generating} generating` : ""}${queue.playingSession ? ` (${queue.playingSession})` : speaker ? ` \xB7 latest: ${speaker}` : ""}`) : null, audio ? /* @__PURE__ */ React.createElement("text", null, `  volume ${audio.available ? audio.muted ? "MUTED" : `${Math.round(audio.volume * 100)}%` : "host"}`) : null);
         }
       });
       if (typeof slot === "function") disposers.push(slot);

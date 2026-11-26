@@ -228,9 +228,11 @@ Last purge: removed 2 files, freed 919.3 KB
 `.voice-requests`). When nothing is playing, the queue line keeps the most
 recent speaker as `latest: <name>` instead of going blank.
 
-`cache` comes from the reply files in `output.directory`, `queue` from the
-audioq queue directories, and `audio` from `wpctl get-volume` on the default
-sink. A host refreshes all three every 15 s; a client reads the host's published
+`cache` is one canonical number: all `reply-*.wav|mp3` under
+`/media/share/tmp/audio` (the shared audio root and its project subdirectories),
+so two hosts or two projects cannot publish different totals for the same tree.
+`queue` comes from the audioq queue directories, and `audio` from
+`wpctl get-volume` on the default sink. A host refreshes all three every 15 s; a client reads the host's published
 values from `.voice-state.json` instead of measuring its own zeroes, and shows
 `Volume: host` when the audio device belongs to the other machine.
 

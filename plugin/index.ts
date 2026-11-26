@@ -771,23 +771,40 @@ function queueCounts(): { queued: number; playing: number; failed: number; playi
   return result
 }
 
-function cacheUsage(dir: string): { files: number; bytes: number } {
-  let files = 0
-  let bytes = 0
+const AUDIO_ROOT = "/media/share/tmp/audio"
+
+/**
+ * One canonical number: every project writes its replies somewhere under the
+ * shared audio root, so summing that tree gives the same answer from any host,
+ * instead of oscillating with whichever project asked last.
+ */
+function cacheUsage(_dir?: string): { files: number; bytes: number } {
+  const roots = [AUDIO_ROOT]
   try {
-    for (const name of readdirSync(dir)) {
-      if (!name.startsWith("reply-")) continue
-      if (!name.endsWith(".wav") && !name.endsWith(".mp3")) continue
-      try {
-        const stat = statSync(path.join(dir, name))
-        files += 1
-        bytes += stat.size
-      } catch {
-        /* raced with a purge */
-      }
+    for (const entry of readdirSync(AUDIO_ROOT, { withFileTypes: true })) {
+      if (entry.isDirectory()) roots.push(path.join(AUDIO_ROOT, entry.name))
     }
   } catch {
-    /* directory not created yet */
+    /* root missing */
+  }
+  let files = 0
+  let bytes = 0
+  for (const dir of roots) {
+    try {
+      for (const name of readdirSync(dir)) {
+        if (!name.startsWith("reply-")) continue
+        if (!name.endsWith(".wav") && !name.endsWith(".mp3")) continue
+        try {
+          const stat = statSync(path.join(dir, name))
+          files += 1
+          bytes += stat.size
+        } catch {
+          /* raced with a purge */
+        }
+      }
+    } catch {
+      /* missing subdir */
+    }
   }
   return { files, bytes }
 }

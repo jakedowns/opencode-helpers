@@ -183,7 +183,7 @@ function AudioPanel(props: { session: Session }) {
       </button>
       <Show when={state()?.cache}>
         <div style={{ opacity: 0.7 }}>
-          Cache: {formatBytes(state()?.cache?.bytes ?? 0)} · {state()?.cache?.files ?? 0} file
+          Cache (all): {formatBytes(state()?.cache?.bytes ?? 0)} · {state()?.cache?.files ?? 0} file
           {(state()?.cache?.files ?? 0) === 1 ? "" : "s"}
         </div>
       </Show>
