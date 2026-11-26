@@ -80,6 +80,15 @@ Paths: `piperd.py` honours `PIPER_BIN` and `PIPER_MODEL`; `audioq.py` honours
 one-shot fallback still defaults to `/media/share/linux-piper-helper`, so a
 clone elsewhere needs the daemon or exported `PIPER_BIN`/`PIPER_MODEL`.
 
+## Location
+
+Canonical source: `packages/audio-tool` in the `opencode-helpers` monorepo
+(`/media/share/opencode-helpers`). The old `/media/share/opencode-audio-tool`
+path is a **relative** symlink to this directory, so it resolves both in the VM
+and through the macOS share (`opencode-helpers/packages/audio-tool`). Runtime
+assets (piper, voices, audio-replies, `.dev`, `.voice-*`, node_modules) live here
+and stay git-ignored.
+
 ## Provenance
 
 Copied from `/media/share/linux-piper-helper` and `/tmp/opencode/audio-replies`
