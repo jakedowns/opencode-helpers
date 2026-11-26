@@ -159,6 +159,18 @@ The palette group and the slash command share one dispatcher:
   owner is confirmed dead.
 - Failures are logged and returned as tool content; nothing throws into a turn.
 
+## Voices
+
+`output`/`synthesis` in the reply config choose the voice. `voice_per_session`
+(default true) hashes the session id into `synthesis.voices`, so concurrent
+sessions keep distinguishable voices; `voice_speak` accepts `voice: "alan.onnx"`
+to override one call. Voices must match this piper generation
+(`northern_english_male` crashes it).
+
+Verified by synthesising one sentence four times: `alan.onnx` and the automatic
+per-session pick had identical duration (2.586 s), while `voice.onnx` (2.691 s)
+and `lessac-low.onnx` (2.916 s) differed.
+
 ## Format and retention
 
 Links default to **MP3** (`output.format`), because iOS Safari will not play a
@@ -207,9 +219,14 @@ Both clients also show live state in the GUI Audio panel and TUI sidebar:
 ```
 Mode: host · Auto-speak: on          ← clickable: mute all / turn on
 Cache: 4.3 MB · 7 files
-Queue: 0 queued · 0 playing — Agent Voice Tool
-Volume: 70%                           # "muted", or "host" on a client
+Queue: 0 queued · 1 playing · 2 generating — Agent Voice Tool
+Volume [==========|-------] 70%       ← slider; "host" on a client
+Last purge: removed 2 files, freed 919.3 KB
 ```
+
+`generating` counts synthesis in flight (active speaks plus claimed
+`.voice-requests`). When nothing is playing, the queue line keeps the most
+recent speaker as `latest: <name>` instead of going blank.
 
 `cache` comes from the reply files in `output.directory`, `queue` from the
 audioq queue directories, and `audio` from `wpctl get-volume` on the default

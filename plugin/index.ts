@@ -34,6 +34,7 @@ import {
   setMute,
   setPurgeAttempt,
   setQueue,
+  setGenerating,
   setSidebar,
 } from "./state.ts"
 import { Voice } from "./rpc.ts"
@@ -177,7 +178,12 @@ type ReplyConfig = {
       sweep_interval_minutes?: number
     }
   }
-  synthesis?: { model?: string; length_scale?: number }
+  synthesis?: {
+    model?: string
+    length_scale?: number
+    voice_per_session?: boolean
+    voices?: string[]
+  }
 }
 
 const DEFAULT_OUTPUT_DIR = "/media/share/tmp/audio/opencode-audio-tool"
@@ -192,6 +198,23 @@ function retentionFor(config: ReplyConfig): Retention {
     ? Math.max(1, Number(value.sweep_interval_minutes))
     : 60
   return { days, maxFiles, onStart: value.sweep_on_start !== false, intervalMin }
+}
+
+/**
+ * Pick the piper model for one utterance. Explicit voice wins; otherwise a
+ * per-session voice is chosen by hashing the session id, so two sessions keep
+ * two distinguishable voices for their whole life.
+ */
+function voiceModel(config: ReplyConfig, root: string, sessionID?: string, explicit?: string): string {
+  const resolve = (name: string) => (name.includes("/") ? name : path.join(root, "voices", name))
+  if (explicit) return resolve(explicit)
+  const voices = config.synthesis?.voices ?? []
+  if (config.synthesis?.voice_per_session !== false && voices.length > 0 && sessionID) {
+    let hash = 0
+    for (const char of sessionID) hash = (hash * 31 + char.charCodeAt(0)) >>> 0
+    return resolve(voices[hash % voices.length])
+  }
+  return config.synthesis?.model || path.join(root, "voices", "voice.onnx")
 }
 
 function formatBytes(bytes: number): string {
@@ -357,6 +380,37 @@ function pickLastAssistant(messages: any[]): { id: string; text: string } | null
   return null
 }
 
+let activeSpeak = 0
+
+function processingCount(root: string): number {
+  try {
+    return readdirSync(path.join(root, ".voice-requests")).filter((name) => name.endsWith(".processing"))
+      .length
+  } catch {
+    return 0
+  }
+}
+
+function refreshGenerating(root: string): void {
+  setGenerating(root, activeSpeak + processingCount(root))
+}
+
+async function speakDurable(
+  root: string,
+  cwd: string,
+  text: string,
+  opts: { sessionID?: string; noPreamble?: boolean; title?: string | null; voice?: string } = {},
+): Promise<SpeakResult> {
+  activeSpeak += 1
+  refreshGenerating(root)
+  try {
+    return await speakDurableInner(root, cwd, text, opts)
+  } finally {
+    activeSpeak -= 1
+    refreshGenerating(root)
+  }
+}
+
 async function lastAssistantText(
   ctx: { session: { context: (input: { sessionID: string }) => Promise<any> } },
   sessionID: string,
@@ -442,11 +496,11 @@ function removeEntry(root: string, target: string): boolean {
   return true
 }
 
-async function speakDurable(
+async function speakDurableInner(
   root: string,
   cwd: string,
   text: string,
-  opts: { sessionID?: string; noPreamble?: boolean; title?: string | null } = {},
+  opts: { sessionID?: string; noPreamble?: boolean; title?: string | null; voice?: string } = {},
 ): Promise<SpeakResult> {
   const sessionArgs: string[] = []
   const resolvedTitle =
@@ -462,7 +516,7 @@ async function speakDurable(
 
   const config = await readConfig(root, cwd)
   const outputDir = config.output?.directory || "/media/share/tmp/audio/opencode-audio-tool"
-  const model = config.synthesis?.model || path.join(root, "voices", "voice.onnx")
+  const model = voiceModel(config, root, opts.sessionID, opts.voice)
   const lengthScale = config.synthesis?.length_scale ?? 0.67
 
   mkdirSync(outputDir, { recursive: true })
@@ -655,6 +709,15 @@ function readIndex(root: string, limit = 20): IndexEntry[] {
 type AudioStatus = { at: number; available: boolean; muted: boolean; volume: number }
 let audioCache: { at: number; value: AudioStatus } | null = null
 
+async function setSinkVolume(value: number): Promise<void> {
+  const clamped = Math.min(1, Math.max(0, value))
+  await run("wpctl", ["set-volume", "@DEFAULT_AUDIO_SINK@", clamped.toFixed(2)], { timeoutMs: 3000 })
+  if (clamped > 0) {
+    await run("wpctl", ["set-mute", "@DEFAULT_AUDIO_SINK@", "0"], { timeoutMs: 3000 })
+  }
+  audioCache = null
+}
+
 async function audioStatus(): Promise<AudioStatus> {
   if (audioCache && Date.now() - audioCache.at < 5000) return audioCache.value
   const result = await run("wpctl", ["get-volume", "@DEFAULT_AUDIO_SINK@"], { timeoutMs: 3000 })
@@ -773,6 +836,8 @@ async function voiceState(
     cache: { files: number; bytes: number }
     audio: AudioStatus
     queue: { queued: number; playing: number; failed: number }
+    generating: number
+    lastSpeaker?: { at: number; session: string }
     lastPurge?: { at: number; removed: number; bytes: number }
     lastAttempt?: { at: number; removed: number; bytes: number }
   } = {
@@ -780,10 +845,12 @@ async function voiceState(
     mutes: resolveMutes(state, directory, sessionID),
     sidebar: state.sidebar,
     mode,
+    generating: activeSpeak + processingCount(root),
     cache,
     audio,
     queue,
   }
+  if (state.lastSpeaker) result.lastSpeaker = state.lastSpeaker
   if (state.lastPurge) result.lastPurge = state.lastPurge
   if (state.lastAttempt) result.lastAttempt = state.lastAttempt
   return result
@@ -868,6 +935,16 @@ function startRequestWatcher(root: string, location: string): () => void {
               /* sweep will clean it */
             }
             log("purge request served")
+            continue
+          }
+          if (request.kind === "volume" && typeof (request as { value?: number }).value === "number") {
+            await setSinkVolume(Number((request as { value?: number }).value))
+            try {
+              unlinkSync(claim)
+            } catch {
+              /* sweep will clean it */
+            }
+            log("volume request served")
             continue
           }
           if (request.kind === "remove" && request.path) {
@@ -968,6 +1045,7 @@ export default Plugin.define({
           const usage = cacheUsage(outputDir)
           setCache(root, usage.files, usage.bytes)
           setQueue(root, queueCounts())
+          setGenerating(root, activeSpeak + processingCount(root))
           setAudio(root, await audioStatus())
         })().catch((error) => log("stats refresh failed", String(error)))
       }
@@ -1064,6 +1142,17 @@ export default Plugin.define({
           }
           return await voiceState(root, args.directory ?? location, args.sessionID, mode)
         },
+        setVolume: async (input: unknown) => {
+          const args = (input ?? {}) as { directory?: string; sessionID?: string; value?: number }
+          const value = Math.min(1, Math.max(0, Number(args.value) || 0))
+          if (mode === "client") {
+            writeControl(root, { kind: "volume", value })
+            await new Promise((resolve) => setTimeout(resolve, 800))
+          } else {
+            await setSinkVolume(value)
+          }
+          return await voiceState(root, args.directory ?? location, args.sessionID, mode)
+        },
         repeat: async (input: unknown) => {
           const args = (input ?? {}) as { directory?: string; sessionID?: string }
           const dir = args.directory ?? location
@@ -1106,13 +1195,19 @@ export default Plugin.define({
             "Synthesise text to a WAV in the reply directory and enqueue it for local playback. Returns path, duration and generation time.",
           input: {
             type: "object",
-            properties: { text: { type: "string" } },
+            properties: {
+              text: { type: "string" },
+              voice: { type: "string", description: "Piper model file name from voices/" },
+            },
             required: ["text"],
             additionalProperties: false,
           },
           options: { namespace: "voice", codemode: true },
           execute: async (input: unknown, context?: { sessionID?: string }) => {
             const text = String((input as { text?: unknown })?.text ?? "").trim()
+            const voice = (input as { voice?: unknown })?.voice
+              ? String((input as { voice?: unknown }).voice)
+              : undefined
             if (!text) return { content: "voice: empty text; nothing to speak." }
             if (mode === "remote") {
               return {
@@ -1126,7 +1221,10 @@ export default Plugin.define({
               return { content: JSON.stringify({ ok: true, ...request }) }
             }
             try {
-              const result = await speakDurable(root, location, text, { sessionID: context?.sessionID })
+              const result = await speakDurable(root, location, text, {
+                sessionID: context?.sessionID,
+                voice,
+              })
               recordIndex(root, {
                 path: String(result.path),
                 seconds: result.seconds,

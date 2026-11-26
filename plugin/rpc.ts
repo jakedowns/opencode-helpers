@@ -36,6 +36,7 @@ const state = {
     mutes,
     sidebar: { type: "boolean" },
     mode: { type: "string", enum: ["host", "client", "remote"] },
+    generating: { type: "number" },
     queue: {
       type: "object",
       properties: {
@@ -68,6 +69,15 @@ const state = {
       required: ["at", "files", "bytes"],
       additionalProperties: false,
     },
+    lastSpeaker: {
+      type: "object",
+      properties: {
+        at: { type: "number" },
+        session: { type: "string" },
+      },
+      required: ["at", "session"],
+      additionalProperties: false,
+    },
     lastAttempt: {
       type: "object",
       properties: {
@@ -89,7 +99,7 @@ const state = {
       additionalProperties: false,
     },
   },
-  required: ["entries", "mutes", "sidebar", "mode"],
+  required: ["entries", "mutes", "sidebar", "mode", "generating"],
   additionalProperties: false,
 } as const
 
@@ -119,6 +129,18 @@ export const Voice = Rpc.define({
           value: { type: "boolean" },
         },
         required: ["directory", "scope", "value"],
+        additionalProperties: false,
+      },
+      output: state,
+    },
+    setVolume: {
+      input: {
+        type: "object",
+        properties: {
+          ...location,
+          value: { type: "number" },
+        },
+        required: ["directory", "value"],
         additionalProperties: false,
       },
       output: state,

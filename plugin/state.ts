@@ -13,7 +13,15 @@ export type Scope = "session" | "project" | "global"
 export type LastPurge = { at: number; removed: number; bytes: number }
 export type CacheStats = { at: number; files: number; bytes: number }
 export type AudioStatus = { at: number; available: boolean; muted: boolean; volume: number }
-export type QueueStats = { at: number; queued: number; playing: number; failed: number; playingSession?: string }
+export type QueueStats = {
+  at: number
+  queued: number
+  playing: number
+  failed: number
+  playingSession?: string
+}
+export type LastSpeaker = { at: number; session: string }
+export type Generating = { at: number; count: number }
 
 export type VoiceState = {
   global: boolean
@@ -25,6 +33,8 @@ export type VoiceState = {
   cache?: CacheStats
   audio?: AudioStatus
   queue?: QueueStats
+  lastSpeaker?: LastSpeaker
+  generating?: Generating
 }
 
 const EMPTY: VoiceState = { global: false, projects: {}, sessions: {}, sidebar: true }
@@ -41,6 +51,14 @@ export function readState(root: string): VoiceState {
       projects: parsed?.projects && typeof parsed.projects === "object" ? parsed.projects : {},
       sessions: parsed?.sessions && typeof parsed.sessions === "object" ? parsed.sessions : {},
       sidebar: parsed?.sidebar !== false,
+      generating:
+        parsed?.generating && typeof parsed.generating.at === "number"
+          ? { at: parsed.generating.at, count: Number(parsed.generating.count) || 0 }
+          : undefined,
+      lastSpeaker:
+        parsed?.lastSpeaker && typeof parsed.lastSpeaker.at === "number" && parsed.lastSpeaker.session
+          ? { at: parsed.lastSpeaker.at, session: String(parsed.lastSpeaker.session) }
+          : undefined,
       queue:
         parsed?.queue && typeof parsed.queue.at === "number"
           ? {
@@ -154,6 +172,9 @@ export function setQueue(
 ): VoiceState {
   const state = readState(root)
   state.queue = { at: Date.now(), ...counts }
+  if (counts.playingSession) {
+    state.lastSpeaker = { at: Date.now(), session: counts.playingSession }
+  }
   return writeState(root, state)
 }
 
@@ -161,5 +182,11 @@ export function setPurgeAttempt(root: string, removed: number, bytes: number): V
   const state = readState(root)
   state.lastAttempt = { at: Date.now(), removed, bytes }
   if (removed > 0) state.lastPurge = state.lastAttempt
+  return writeState(root, state)
+}
+
+export function setGenerating(root: string, count: number): VoiceState {
+  const state = readState(root)
+  state.generating = { at: Date.now(), count: Math.max(0, count) }
   return writeState(root, state)
 }

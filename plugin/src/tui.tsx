@@ -157,6 +157,8 @@ export default Plugin.define({
       const stored = readState(root)
       const cache = stored.cache
       const queue = stored.queue
+      const speaker = stored.lastSpeaker?.session
+      const generating = stored.generating?.count ?? 0
       const audio = stored.audio
       return (
         <box flexDirection="column" padding={1} gap={1}>
@@ -164,7 +166,7 @@ export default Plugin.define({
           <text>{statusLine()}</text>
           {cache ? <text>{`cache ${formatBytes(cache.bytes)} · ${cache.files} file${cache.files === 1 ? "" : "s"}`}</text> : null}
           {queue ? (
-            <text>{`queue ${queue.queued} · playing ${queue.playing}${queue.playingSession ? ` (${queue.playingSession})` : ""}`}</text>
+            <text>{`queue ${queue.queued} · playing ${queue.playing}${generating > 0 ? ` · ${generating} generating` : ""}${queue.playingSession ? ` (${queue.playingSession})` : speaker ? ` · latest: ${speaker}` : ""}`}</text>
           ) : null}
           {audio ? (
             <text>{`volume ${audio.available ? (audio.muted ? "MUTED" : `${Math.round(audio.volume * 100)}%`) : "host"}`}</text>
@@ -291,6 +293,8 @@ export default Plugin.define({
           const stored = readState(root)
           const cache = stored.cache
           const queue = stored.queue
+          const speaker = stored.lastSpeaker?.session
+          const generating = stored.generating?.count ?? 0
           const audio = stored.audio
           return (
             <box flexDirection="column">
@@ -304,7 +308,7 @@ export default Plugin.define({
                 <text>{`  cache ${formatBytes(cache.bytes)} · ${cache.files} file${cache.files === 1 ? "" : "s"}`}</text>
               ) : null}
               {queue ? (
-                <text>{`  queue ${queue.queued} · playing ${queue.playing}${queue.playingSession ? ` (${queue.playingSession})` : ""}`}</text>
+                <text>{`  queue ${queue.queued} · playing ${queue.playing}${generating > 0 ? ` · ${generating} generating` : ""}${queue.playingSession ? ` (${queue.playingSession})` : speaker ? ` · latest: ${speaker}` : ""}`}</text>
               ) : null}
               {audio ? (
                 <text>{`  volume ${audio.available ? (audio.muted ? "MUTED" : `${Math.round(audio.volume * 100)}%`) : "host"}`}</text>

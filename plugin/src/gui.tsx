@@ -15,7 +15,8 @@ type Mutes = { session: boolean; project: boolean; global: boolean }
 type Purge = { at: number; removed: number; bytes: number }
 type Cache = { at: number; files: number; bytes: number }
 type Audio = { at: number; available: boolean; muted: boolean; volume: number }
-type QueueStats = { queued: number; playing: number; failed: number }
+type QueueStats = { queued: number; playing: number; failed: number; playingSession?: string }
+type LastSpeaker = { at: number; session: string }
 type State = {
   entries: Entry[]
   mutes: Mutes
@@ -24,6 +25,8 @@ type State = {
   cache?: Cache
   audio?: Audio
   queue?: QueueStats
+  generating?: number
+  lastSpeaker?: LastSpeaker
   lastPurge?: Purge
   lastAttempt?: Purge
 }
@@ -88,6 +91,13 @@ function AudioPanel(props: { session: Session }) {
     ctx.client
       .rpc(Voice)
       .purge({ directory: props.session.directory, sessionID: props.session.id, days: 0 })
+      .then((next: unknown) => setState(next as State))
+      .catch(() => {})
+
+  const setVolume = (value: number) =>
+    ctx.client
+      .rpc(Voice)
+      .setVolume({ directory: props.session.directory, sessionID: props.session.id, value })
       .then((next: unknown) => setState(next as State))
       .catch(() => {})
 
@@ -180,18 +190,34 @@ function AudioPanel(props: { session: Session }) {
       <Show when={state()?.queue}>
         <div style={{ opacity: 0.7 }}>
           Queue: {state()?.queue?.queued ?? 0} queued · {state()?.queue?.playing ?? 0} playing
-          {state()?.queue?.playingSession ? ` — ${state()?.queue?.playingSession}` : ""}
+          {(state()?.generating ?? 0) > 0 ? ` · ${state()?.generating} generating` : ""}
+          {state()?.queue?.playingSession
+            ? ` — ${state()?.queue?.playingSession}`
+            : state()?.lastSpeaker
+              ? ` · latest: ${state()?.lastSpeaker?.session}`
+              : ""}
         </div>
       </Show>
-      <Show when={state()?.audio}>
-        <div style={{ opacity: 0.7 }}>
-          Volume:{" "}
-          {state()?.audio?.available
-            ? state()?.audio?.muted
-              ? "muted"
-              : `${Math.round((state()?.audio?.volume ?? 0) * 100)}%`
-            : "host"}
+      <Show when={state()?.audio?.available}>
+        <div style={{ display: "flex", "align-items": "center", gap: "8px" }}>
+          <span>Volume</span>
+          <input
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            value={Math.round((state()?.audio?.volume ?? 0) * 100)}
+            onChange={(event) => void setVolume(Number(event.currentTarget.value) / 100)}
+            style={{ flex: "1 1 auto", "min-width": "0" }}
+          />
+          <span style={{ width: "4ch", "text-align": "right", opacity: 0.7 }}>
+            {Math.round((state()?.audio?.volume ?? 0) * 100)}%
+          </span>
+          {state()?.audio?.muted ? <span style={{ opacity: 0.7 }}>muted</span> : null}
         </div>
+      </Show>
+      <Show when={state()?.audio && !state()?.audio?.available}>
+        <div style={{ opacity: 0.7 }}>Volume: host</div>
       </Show>
       <div style={{ display: "flex", gap: "6px", "flex-wrap": "wrap" }}>
         <button
