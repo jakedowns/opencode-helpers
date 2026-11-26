@@ -18,7 +18,7 @@ import { Voice } from "../rpc.ts"
 import { VOICE_PALETTE, VOICE_SLASH, parseVoiceInput } from "../commands.ts"
 
 type Scope = "session" | "project" | "global"
-type IndexEntry = { path: string; seconds?: number; at: number; session?: string }
+type IndexEntry = { path: string; seconds?: number; at: number; session?: string; child?: boolean }
 
 function readIndex(root: string, limit = 4): IndexEntry[] {
   try {
@@ -41,7 +41,7 @@ function entryLabel(entry: IndexEntry): string {
   const name = path.basename(entry.path)
   if (!entry.session) return name
   const title = entry.session.length > 10 ? `${entry.session.slice(0, 9)}…` : entry.session
-  return `${title} ${name}`
+  return `${entry.child ? "↳ " : ""}${title} ${name}`
 }
 
 function age(at: number): string {

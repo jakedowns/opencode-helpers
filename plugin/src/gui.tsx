@@ -11,7 +11,7 @@ import { For, Show, createSignal, onCleanup, onMount } from "solid-js"
 import { Voice } from "../rpc.ts"
 import { VOICE_PALETTE, VOICE_SLASH, parseVoiceInput } from "../commands.ts"
 
-type Entry = { path: string; seconds?: number; at: number; session?: string }
+type Entry = { path: string; seconds?: number; at: number; session?: string; child?: boolean }
 type Mutes = { session: boolean; project: boolean; global: boolean }
 type Purge = { at: number; removed: number; bytes: number }
 type Cache = { at: number; files: number; bytes: number }
@@ -54,7 +54,7 @@ function entryLabel(entry: Entry): string {
   const name = entry.path.split("/").pop() ?? entry.path
   if (!entry.session) return name
   const title = entry.session.length > 10 ? `${entry.session.slice(0, 9)}…` : entry.session
-  return `${title} ${name}`
+  return `${entry.child ? "↳ " : ""}${title} ${name}`
 }
 
 function age(at: number): string {

@@ -122,7 +122,8 @@ var entry = {
     path: { type: "string" },
     seconds: { type: "number" },
     at: { type: "number" },
-    session: { type: "string" }
+    session: { type: "string" },
+    child: { type: "boolean" }
   },
   required: ["path", "at"],
   additionalProperties: false
@@ -181,7 +182,8 @@ var state = {
       type: "object",
       properties: {
         at: { type: "number" },
-        session: { type: "string" }
+        session: { type: "string" },
+        child: { type: "boolean" }
       },
       required: ["at", "session"],
       additionalProperties: false
@@ -408,7 +410,7 @@ function entryLabel(entry2) {
   const name = path2.basename(entry2.path);
   if (!entry2.session) return name;
   const title = entry2.session.length > 10 ? `${entry2.session.slice(0, 9)}\u2026` : entry2.session;
-  return `${title} ${name}`;
+  return `${entry2.child ? "\u21B3 " : ""}${title} ${name}`;
 }
 function age(at) {
   const seconds = Math.max(0, Math.round((Date.now() - at) / 1e3));

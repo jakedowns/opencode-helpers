@@ -13,6 +13,7 @@ const entry = {
     seconds: { type: "number" },
     at: { type: "number" },
     session: { type: "string" },
+    child: { type: "boolean" },
   },
   required: ["path", "at"],
   additionalProperties: false,
@@ -74,6 +75,7 @@ const state = {
       properties: {
         at: { type: "number" },
         session: { type: "string" },
+    child: { type: "boolean" },
       },
       required: ["at", "session"],
       additionalProperties: false,

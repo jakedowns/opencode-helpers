@@ -45,6 +45,7 @@ type ResolvedMode = Exclude<Mode, "auto">
 type Options = {
   mode?: Mode
   autoUnmute?: boolean
+  speakSubagents?: boolean
   root?: string
   auto?: boolean
   maxChars?: number
@@ -178,6 +179,7 @@ type ReplyConfig = {
       sweep_interval_minutes?: number
     }
   }
+  playback?: { speak_subagents?: boolean }
   synthesis?: {
     model?: string
     length_scale?: number
@@ -330,7 +332,7 @@ function slug(text: string): string {
   )
 }
 
-type IndexEntry = { path: string; seconds?: number; at: number; via?: string; session?: string }
+type IndexEntry = { path: string; seconds?: number; at: number; via?: string; session?: string; child?: boolean }
 
 /**
  * Newest-first list the TUI sidebar reads. Kept at the repo root so the TUI
@@ -619,9 +621,40 @@ async function waitForState(root: string, before: number, ms = 8000): Promise<vo
 
 type MuteState = { session: boolean; project: boolean; global: boolean }
 
-async function readMutes(_ctx: any, root: string, location: string, sessionID?: string): Promise<MuteState> {
+type SessionMeta = { parentID?: string }
+const sessionMetaCache = new Map<string, SessionMeta>()
+
+async function sessionMeta(ctx: any, sessionID?: string): Promise<SessionMeta> {
+  if (!sessionID) return {}
+  const cached = sessionMetaCache.get(sessionID)
+  if (cached) return cached
+  try {
+    const info = await ctx.session.get({ sessionID })
+    const meta: SessionMeta = { parentID: (info as { parentID?: string })?.parentID }
+    sessionMetaCache.set(sessionID, meta)
+    return meta
+  } catch {
+    return {}
+  }
+}
+
+async function readMutes(ctx: any, root: string, location: string, sessionID?: string): Promise<MuteState> {
   const state = readState(root)
-  return resolveMutes(state, location, sessionID)
+  const mutes = resolveMutes(state, location, sessionID)
+  // A session mute covers its subagents: walk the parent chain.
+  if (!mutes.session && sessionID) {
+    let current: string | undefined = sessionID
+    for (let depth = 0; depth < 8; depth += 1) {
+      const meta = await sessionMeta(ctx, current)
+      if (!meta.parentID) break
+      current = meta.parentID
+      if (state.sessions[current] === true) {
+        mutes.session = true
+        break
+      }
+    }
+  }
+  return mutes
 }
 
 function pidAlive(pid: number): boolean {
@@ -842,12 +875,13 @@ async function voiceState(
   // Optional fields must be absent, not null: RPC validates the encoded JSON,
   // and `undefined` becomes `null`, which fails the declared type.
   const entries = readIndex(root).map((entry) => {
-    const row: { path: string; at: number; seconds?: number; session?: string } = {
+    const row: { path: string; at: number; seconds?: number; session?: string; child?: boolean } = {
       path: entry.path,
       at: entry.at,
     }
     if (typeof entry.seconds === "number") row.seconds = entry.seconds
     if (typeof entry.session === "string" && entry.session) row.session = entry.session
+    if (entry.child === true) row.child = true
     return row
   })
   const result: {
@@ -881,7 +915,13 @@ async function voiceState(
 type RequestResult = { requested: true; id: string }
 
 /** Client mode: hand the text to the host through the shared folder. */
-function writeRequest(root: string, text: string, sessionID?: string, sessionTitle?: string | null): RequestResult {
+function writeRequest(
+  root: string,
+  text: string,
+  sessionID?: string,
+  sessionTitle?: string | null,
+  child = false,
+): RequestResult {
   const dir = path.join(root, ".voice-requests")
   mkdirSync(dir, { recursive: true })
   const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
@@ -889,7 +929,7 @@ function writeRequest(root: string, text: string, sessionID?: string, sessionTit
   const tmp = `${file}.part`
   writeFileSync(
     tmp,
-    `${JSON.stringify({ id, text, sessionID, sessionTitle, created_at: Date.now() })}\n`,
+    `${JSON.stringify({ id, text, sessionID, sessionTitle, child, created_at: Date.now() })}\n`,
   )
   renameSync(tmp, file)
   return { requested: true, id }
@@ -945,6 +985,7 @@ function startRequestWatcher(root: string, location: string): () => void {
             text?: string
             sessionID?: string
             sessionTitle?: string
+            child?: boolean
             days?: number
             path?: string
           }
@@ -994,6 +1035,7 @@ function startRequestWatcher(root: string, location: string): () => void {
             at: Date.now(),
             via: "request",
             session: request.sessionTitle ?? result.title ?? undefined,
+            child: request.child === true,
           })
           try {
             unlinkSync(claim)
@@ -1025,6 +1067,9 @@ export default Plugin.define({
   async setup(ctx) {
     const options = (ctx.options ?? {}) as Options
     const root = options.root ?? DEFAULT_ROOT
+    const startupConfig = await readConfig(root, location)
+    const speakSubagents =
+      options.speakSubagents ?? startupConfig.playback?.speak_subagents ?? false
     const requestedMode: Mode = options.mode ?? "auto"
     const mode: ResolvedMode = resolveMode(requestedMode, root)
     const maxChars = typeof options.maxChars === "number" ? options.maxChars : DEFAULT_MAX_CHARS
@@ -1060,7 +1105,7 @@ export default Plugin.define({
         }
       }
 
-      const hostConfig = await readConfig(root, location)
+      const hostConfig = startupConfig
       const outputDir = hostConfig.output?.directory || DEFAULT_OUTPUT_DIR
       const refreshStats = () => {
         void (async () => {
@@ -1231,6 +1276,7 @@ export default Plugin.define({
               ? String((input as { voice?: unknown }).voice)
               : undefined
             if (!text) return { content: "voice: empty text; nothing to speak." }
+            const meta = await sessionMeta(ctx, context?.sessionID)
             if (mode === "remote") {
               return {
                 content:
@@ -1239,7 +1285,7 @@ export default Plugin.define({
             }
             if (mode === "client") {
               const title = await sessionTitle(root, context?.sessionID)
-              const request = writeRequest(root, text, context?.sessionID, title)
+              const request = writeRequest(root, text, context?.sessionID, title, Boolean(meta.parentID))
               return { content: JSON.stringify({ ok: true, ...request }) }
             }
             try {
@@ -1253,6 +1299,7 @@ export default Plugin.define({
                 at: Date.now(),
                 via: result.via,
                 session: result.title ?? undefined,
+                child: Boolean(meta.parentID),
               })
               return { content: JSON.stringify({ ok: true, ...result }) }
             } catch (error) {
@@ -1281,7 +1328,7 @@ export default Plugin.define({
               const args = (input ?? {}) as { action?: string; scope?: string }
               const scope = (args.scope ?? "session") as "session" | "project" | "global"
               if (args.action === "status") {
-                const mutes = resolveMutes(readState(root), location, context?.sessionID)
+                const mutes = await readMutes(ctx, root, location, context?.sessionID)
                 const effective = mutes.global || mutes.project || mutes.session
                 return { content: JSON.stringify({ ok: true, mutes, effective }) }
               }
@@ -1359,6 +1406,11 @@ export default Plugin.define({
     try {
       await ctx.session.hook("experimental.idle", async (event) => {
         try {
+          const meta = await sessionMeta(ctx, event.sessionID)
+          if (meta.parentID && !speakSubagents) {
+            log(`skip subagent ${event.sessionID} (speakSubagents off)`)
+            return
+          }
           const mutes = await readMutes(ctx, root, location, event.sessionID)
           if (mutes.global || mutes.project || mutes.session) {
             log(`muted (${JSON.stringify(mutes)})`)
@@ -1381,7 +1433,7 @@ export default Plugin.define({
             const resolved = await sessionTitle(root, event.sessionID)
             const title = cleaned ? resolved : (resolved ?? "this session")
             const payload = cleaned || noticeTemplate.replaceAll("{session}", title)
-            const request = writeRequest(root, payload, event.sessionID, resolved)
+            const request = writeRequest(root, payload, event.sessionID, resolved, Boolean(meta.parentID))
             log(`requested ${request.id}${cleaned ? "" : " (untranscribable notice)"}`)
             return
           }
@@ -1396,6 +1448,7 @@ export default Plugin.define({
               at: Date.now(),
               via: result.via,
               session: result.title ?? title,
+              child: Boolean(meta.parentID),
             })
             return
           }
@@ -1406,6 +1459,7 @@ export default Plugin.define({
             at: Date.now(),
             via: result.via,
             session: result.title ?? undefined,
+            child: Boolean(meta.parentID),
           })
         } catch (error) {
           log("auto-speak failed", String(error))

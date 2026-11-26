@@ -170,6 +170,15 @@ The dispatcher itself:
   owner is confirmed dead.
 - Failures are logged and returned as tool content; nothing throws into a turn.
 
+## Subagents
+
+A subagent is a session with a `parentID`. Auto-speak skips those by default
+(`playback.speak_subagents: false`, or plugin option `speakSubagents`); an
+explicit `voice_speak` from a subagent still works, because the agent asked for
+it. Muting a parent session now also silences its subagents — the mute check
+walks the parent chain (up to 8 levels) — while project/global mutes apply as
+before. Entries produced by a child are prefixed `↳` in both panels.
+
 ## Voices
 
 `output`/`synthesis` in the reply config choose the voice. `voice_per_session`
