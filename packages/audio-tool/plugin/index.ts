@@ -1067,6 +1067,7 @@ export default Plugin.define({
   async setup(ctx) {
     const options = (ctx.options ?? {}) as Options
     const root = options.root ?? DEFAULT_ROOT
+    const location = ctx.location?.directory ?? process.cwd()
     const startupConfig = await readConfig(root, location)
     const speakSubagents =
       options.speakSubagents ?? startupConfig.playback?.speak_subagents ?? false
@@ -1074,7 +1075,6 @@ export default Plugin.define({
     const mode: ResolvedMode = resolveMode(requestedMode, root)
     const maxChars = typeof options.maxChars === "number" ? options.maxChars : DEFAULT_MAX_CHARS
     const noticeTemplate = options.emptyNotice ?? DEFAULT_NOTICE
-    const location = ctx.location?.directory ?? process.cwd()
     const hasConfig = existsSync(path.join(location, ".dev", "audiomode.jsonc"))
     // Explicit `auto: true` speaks even in a project without .dev/audiomode.jsonc;
     // an absent option still follows the per-project opt-in.

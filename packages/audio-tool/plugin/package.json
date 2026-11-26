@@ -1,11 +1,25 @@
 {
+  "name": "assistant-voice-opencode-plugin",
   "version": "0.0.2",
-  "description": "Local text-to-speech for OpenCode replies through the Piper queue",
+  "description": "Local text-to-speech for OpenCode: Piper voice tools, auto-speak, and audio panels for the TUI and desktop GUI",
   "type": "module",
+  "main": "./index.ts",
+  "files": [
+    "index.ts",
+    "rpc.ts",
+    "state.ts",
+    "commands.ts",
+    "tui.js",
+    "gui-experimental.cjs",
+    "src",
+    "README.md",
+    "PROPOSAL.md"
+  ],
   "scripts": {
     "build": "npm run build:tui && npm run build:gui",
     "build:tui": "esbuild src/tui.tsx --bundle --format=esm --platform=node --target=node20 --external:@opencode/plugin/tui --external:solid-js --external:'solid-js/*' --external:'@opentui/*' --outfile=tui.js",
-    "build:gui": "vite build"
+    "build:gui": "vite build",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@opencode/plugin": "^2.3.0"
@@ -21,15 +35,31 @@
     "vite": "^7.0.0",
     "vite-plugin-solid": "^2.11.0"
   },
-  "files": [
-    "index.ts",
-    "rpc.ts",
-    "state.ts",
-    "tui.js",
-    "gui-experimental.cjs",
-    "src",
-    "README.md",
-    "PROPOSAL.md"
-  ],
-  "name": "assistant-voice-opencode-plugin"
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT",
+  "author": "Jake Downs <mail@jakedowns.com>",
+  "homepage": "https://github.com/jakedowns/opencode-helpers/tree/main/packages/audio-tool/plugin#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jakedowns/opencode-helpers.git",
+    "directory": "packages/audio-tool/plugin"
+  },
+  "bugs": {
+    "url": "https://github.com/jakedowns/opencode-helpers/issues"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "tts",
+    "text-to-speech",
+    "piper",
+    "voice",
+    "audio",
+    "accessibility"
+  ]
 }
