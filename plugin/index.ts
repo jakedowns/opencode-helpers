@@ -364,10 +364,11 @@ async function speakDurable(
   root: string,
   cwd: string,
   text: string,
-  opts: { sessionID?: string; noPreamble?: boolean } = {},
+  opts: { sessionID?: string; noPreamble?: boolean; title?: string | null } = {},
 ): Promise<SpeakResult> {
   const sessionArgs: string[] = []
-  const resolvedTitle = opts.sessionID ? await sessionTitle(root, opts.sessionID) : null
+  const resolvedTitle =
+    opts.title ?? (opts.sessionID ? await sessionTitle(root, opts.sessionID) : null)
   if (!opts.noPreamble && resolvedTitle) sessionArgs.push("--session", resolvedTitle)
 
   let spoken = text
@@ -797,7 +798,10 @@ function startRequestWatcher(root: string, location: string): () => void {
             unlinkSync(claim)
             continue
           }
-          const result = await speakDurable(root, location, text, { sessionID: request.sessionID })
+          const result = await speakDurable(root, location, text, {
+            sessionID: request.sessionID,
+            title: request.sessionTitle ?? null,
+          })
           recordIndex(root, {
             path: String(result.path),
             seconds: result.seconds,
@@ -881,7 +885,7 @@ export default Plugin.define({
         })().catch((error) => log("stats refresh failed", String(error)))
       }
       refreshStats()
-      const statsTimer = setInterval(refreshStats, 15_000)
+      const statsTimer = setInterval(refreshStats, 5_000)
       cleanups.push(() => clearInterval(statsTimer))
 
       const retention = retentionFor(hostConfig)
@@ -1010,7 +1014,8 @@ export default Plugin.define({
               }
             }
             if (mode === "client") {
-              const request = writeRequest(root, text, context?.sessionID)
+              const title = await sessionTitle(root, context?.sessionID)
+              const request = writeRequest(root, text, context?.sessionID, title)
               return { content: JSON.stringify({ ok: true, ...request }) }
             }
             try {

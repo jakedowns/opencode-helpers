@@ -219,7 +219,9 @@ Mute buttons show their state — `✓ session muted` vs `○ session on`. The
 "Mode: host · Auto-speak: …" line is a button: when anything is muted it clears
 global, project and session mutes in one click; when on, it mutes globally.
 The queue line names the session whose reply is playing, using `--session` on
-`audioq.py enqueue`. Each row in the
+`audioq.py enqueue`. A client-supplied title is carried through the request file
+(`sessionTitle`) and used for both the preamble and the queue sidecar, so the
+Mac's session name survives the hop. Host stats refresh every 5 s. Each row in the
 GUI panel has an **✕** that deletes that reply from disk and from the index;
 only paths present in the index can be removed, and both `.wav`/`.mp3` variants
 of that basename go.
