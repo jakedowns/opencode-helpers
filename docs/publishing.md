@@ -4,8 +4,8 @@ Current package names:
 
 | Package | Directory | Tag |
 |---|---|---|
-| `@jakedowns/opencode-nudge-core` | `packages/nudge-core` | `nudge-core@0.1.0` |
-| `@jakedowns/opencode-nudge` | `packages/nudge-opencode` | `nudge-opencode@0.1.0` |
+| `@jakedowns/opencode-nudge-core` | `packages/nudge-core` | `nudge-core@0.1.2` |
+| `@jakedowns/opencode-nudge` | `packages/nudge-opencode` | `nudge-opencode@0.1.2` |
 
 The release workflow is `.github/workflows/release.yml`. It uses npm trusted
 publishing (OIDC), so no `NPM_TOKEN` secret is needed.
@@ -52,16 +52,16 @@ tag workflow.
 Core first, adapter second:
 
 ```bash
-git tag -a nudge-core@0.1.0 -m "nudge-core 0.1.0" && git push origin nudge-core@0.1.0
+git tag -a nudge-core@0.1.2 -m "nudge-core 0.1.2" && git push origin nudge-core@0.1.2
 # wait for the workflow, then:
-git tag -a nudge-opencode@0.1.0 -m "nudge-opencode 0.1.0" && git push origin nudge-opencode@0.1.0
+git tag -a nudge-opencode@0.1.2 -m "nudge-opencode 0.1.2" && git push origin nudge-opencode@0.1.2
 ```
 
 Verify:
 
 ```bash
-npm view @jakedowns/opencode-nudge-core@0.1.0 version
-npm view @jakedowns/opencode-nudge@0.1.0 version
+npm view @jakedowns/opencode-nudge-core@0.1.2 version
+npm view @jakedowns/opencode-nudge@0.1.2 version
 ```
 
 ## 3. Then the progress plugin
@@ -75,3 +75,9 @@ Only after both packages are live:
 4. Dogfood `"shadow"`, then `"shared"`.
 
 Do not tag a progress release while the dependency is unpublished.
+
+## Verified
+
+The tag-driven trusted-publishing flow was verified on 2026-11-26 with
+`nudge-core@0.1.2` and `nudge-opencode@0.1.2`. A clean install of the adapter
+resolves core `0.1.2` and imports `attachNudge`/`createNudgeTool`.
