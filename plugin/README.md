@@ -1,32 +1,51 @@
 # assistant-voice-opencode-plugin
 
 Local text-to-speech for OpenCode, built on `audioq.py`. v0.0.1 is a **stub**:
-the tool works end to end; auto-speak is wired but disabled; the sidebar, mute
-scopes, and daemon pid file are not implemented yet.
+the tool and the TUI surface exist, but the sanitiser, mutes, and queue paths
+still need tests before the label changes.
 
 Design and decisions: [`PROPOSAL.md`](./PROPOSAL.md).
 
 ## Load it locally
 
-`opencode.jsonc` in this repository points at the plugin:
+Add the package to the **global** config (`~/.config/opencode/opencode.json`):
 
 ```jsonc
 {
   "plugins": [
     {
-      "package": "./plugin",
+      "package": "/media/share/opencode-audio-tool/plugin",
       "options": {
         "root": "/media/share/opencode-audio-tool",
-        "auto": false
+        "auto": true,
+        "maxChars": 2000
       }
     }
   ]
 }
 ```
 
-OpenCode loads the TypeScript directly; there is nothing to build or install.
-Changing `opencode.jsonc` reloads the plugin. `opencode plugin list` should show
-`assistant-voice local …/opencode-audio-tool/plugin`.
+A global entry is deliberate: a project-local entry loads the server part, but
+the TUI part only becomes visible after the TUI re-reads its plugin list, so one
+global entry avoids project-vs-global ordering surprises. Auto-speak still
+follows the per-project `.dev/audiomode.jsonc`, so projects without one stay
+silent.
+
+The server part is loaded from `index.ts` directly. The TUI part ships prebuilt
+(`dist/tui.js`) because the TUI does not transpile TSX for local packages;
+rebuild it after editing `tui.tsx`:
+
+```sh
+cd plugin
+npx esbuild tui.tsx --bundle --format=esm --platform=node --target=node20 \
+  --external:@opencode/plugin/tui --external:solid-js --external:'solid-js/*' \
+  --external:'@opentui/*' --outfile=dist/tui.js
+```
+
+After changing either part, run `/reload` in the TUI (or restart it) so the
+client re-reads its plugin list; the server part alone hot-reloads on config
+saves. `opencode plugin list` should show `assistant-voice local
+…/opencode-audio-tool/plugin`.
 
 ## Options
 

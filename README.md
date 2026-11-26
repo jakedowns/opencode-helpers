@@ -40,8 +40,12 @@ linux-piper-helper/
   plugin/PROPOSAL.md       proposal: assistant-voice-opencode-plugin v0.0.1 (MVP)
   plugin/index.ts          server part: voice_speak tool + auto-speak hook (stub)
   plugin/README.md         load locally, options, what works and what does not
-  opencode.jsonc           loads ./plugin for sessions in this repository
+  plugin/dist/tui.js       prebuilt TUI part (esbuild; see plugin/README.md)
 ```
+
+The plugin is registered in the global `~/.config/opencode/opencode.json`, not in
+a repository config, so this checkout is the single implementation every
+project loads.
 
 Size on disk: ~522 MB.
 
