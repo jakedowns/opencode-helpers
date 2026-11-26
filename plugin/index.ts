@@ -17,6 +17,7 @@ import {
   readFileSync,
   readdirSync,
   renameSync,
+  statSync,
   unlinkSync,
   writeFileSync,
   writeSync,
@@ -396,18 +397,41 @@ function startRequestWatcher(root: string, location: string): () => void {
       } catch {
         return
       }
-      for (const name of names) {
-        if (seen.has(name)) continue
-        seen.add(name)
-        const file = path.join(dir, name)
+      // Recover claims left behind by a crash: nothing is synthesising a file
+      // this old.
+      for (const name of readdirSync(dir).filter((entry) => entry.endsWith(".json.processing"))) {
+        const stale = path.join(dir, name)
         try {
-          const request = JSON.parse(readFileSync(file, "utf8")) as {
+          if (Date.now() - statSync(stale).mtimeMs > 15 * 60_000) {
+            const name = stale.slice(0, -".processing".length)
+            renameSync(stale, name)
+            seen.delete(path.basename(name))
+          }
+        } catch {
+          /* raced with the owner */
+        }
+      }
+
+      for (const name of names) {
+        if (!name.endsWith(".json")) continue
+        if (seen.has(name)) continue
+        const file = path.join(dir, name)
+        const claim = `${file}.processing`
+        try {
+          renameSync(file, claim) // atomic: the other host's rename now fails
+        } catch {
+          seen.add(name)
+          continue
+        }
+        seen.add(name)
+        try {
+          const request = JSON.parse(readFileSync(claim, "utf8")) as {
             text?: string
             sessionID?: string
           }
           const text = String(request.text ?? "").trim()
           if (!text) {
-            unlinkSync(file)
+            unlinkSync(claim)
             continue
           }
           const result = await speakDurable(root, location, text, { sessionID: request.sessionID })
@@ -418,20 +442,20 @@ function startRequestWatcher(root: string, location: string): () => void {
             via: "request",
           })
           try {
-            unlinkSync(file)
+            unlinkSync(claim)
           } catch {
             // SMB can hold a handle open; a renamed file is still out of the queue.
             try {
-              renameSync(file, `${file}.done`)
+              renameSync(claim, `${file}.done`)
             } catch {
-              /* it will be retried on the next scan only if unreadable */
+              /* a stale sweep will retry it eventually */
             }
           }
           log(`request ${name} spoken`)
         } catch (error) {
           log(`request ${name} failed`, String(error))
           try {
-            renameSync(file, `${file}.failed`)
+            renameSync(claim, `${file}.failed`)
           } catch {
             /* leave it */
           }
@@ -452,7 +476,9 @@ export default Plugin.define({
     const noticeTemplate = options.emptyNotice ?? DEFAULT_NOTICE
     const location = ctx.location?.directory ?? process.cwd()
     const hasConfig = existsSync(path.join(location, ".dev", "audiomode.jsonc"))
-    const auto = options.auto !== false && hasConfig
+    // Explicit `auto: true` speaks even in a project without .dev/audiomode.jsonc;
+    // an absent option still follows the per-project opt-in.
+    const auto = options.auto === true || (options.auto !== false && hasConfig)
     const spoken = new Set<string>()
     const queueDir = process.env.AUDIOQ_DIR || "/tmp/opencode/audio-replies/queue"
     const sock = process.env.AUDIOQ_SOCK || "/tmp/opencode/audio-replies/piperd.sock"

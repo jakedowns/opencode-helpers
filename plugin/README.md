@@ -79,6 +79,12 @@ machines:
 
 The host polls the request directory every 2 s (SMB/virtiofs events are not
 reliable), speaks each request through the normal queue, and records the result.
+Each host claims a request by renaming it to `req-<id>.json.processing` before
+reading it. Rename is atomic across processes, so two host-mode servers (for
+example the desktop app and a `opencode serve --service`) cannot both speak the
+same request. A claim older than 15 minutes is re-queued, so a crash
+mid-synthesis does not strand it.
+
 On a VM whose audio device is passed through, the Mac client needs nothing else:
 the VM plays, the Mac sees the entry.
 
