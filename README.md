@@ -9,9 +9,9 @@ until the maintainer confirms.
 
 | Package | Purpose |
 |---|---|
-| [<img src="https://cdn.simpleicons.org/npm/CB3837" width="14" height="14" alt="npm"> `@jakedowns/opencode-nudge-core`](https://www.npmjs.com/package/@jakedowns/opencode-nudge-core) | Pure nudge policy, rules, matcher, scheduler, wording pools |
-| [<img src="https://cdn.simpleicons.org/npm/CB3837" width="14" height="14" alt="npm"> `@jakedowns/opencode-nudge`](https://www.npmjs.com/package/@jakedowns/opencode-nudge) | OpenCode host adapter: hooks, shared state, one `nudge` key/tool |
-| [<img src="https://cdn.simpleicons.org/npm/CB3837" width="14" height="14" alt="npm"> `@jakedowns/assistant-voice-opencode-plugin`](https://www.npmjs.com/package/@jakedowns/assistant-voice-opencode-plugin) | Local Piper TTS: voice tools, auto-speak, GUI/TUI panels, host/client modes |
+| [<img src="https://cdn.simpleicons.org/npm/CB3837" width="14" height="14" alt="npm">`@jakedowns/opencode-nudge-core`](https://www.npmjs.com/package/@jakedowns/opencode-nudge-core) | Pure nudge policy, rules, matcher, scheduler, wording pools |
+| [<img src="https://cdn.simpleicons.org/npm/CB3837" width="14" height="14" alt="npm">`@jakedowns/opencode-nudge`](https://www.npmjs.com/package/@jakedowns/opencode-nudge) | OpenCode host adapter: hooks, shared state, one `nudge` key/tool |
+| [<img src="https://cdn.simpleicons.org/npm/CB3837" width="14" height="14" alt="npm">`@jakedowns/assistant-voice-opencode-plugin`](https://www.npmjs.com/package/@jakedowns/assistant-voice-opencode-plugin) | Local Piper TTS: voice tools, auto-speak, GUI/TUI panels, host/client modes |
 
 Consumers: [`@jakedowns/progress-tool-opencode-plugin`](https://www.npmjs.com/package/@jakedowns/progress-tool-opencode-plugin), the voice plugin
 (`packages/audio-tool`, also reachable at `/media/share/opencode-audio-tool` via
