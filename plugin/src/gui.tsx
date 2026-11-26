@@ -9,6 +9,7 @@ import { Command, MenuItem, Panel, Plugin, usePlugin } from "@opencode/plugin/gu
 import type { PanelTab } from "@opencode/plugin/gui"
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js"
 import { Voice } from "../rpc.ts"
+import { VOICE_PALETTE, VOICE_SLASH, parseVoiceInput } from "../commands.ts"
 
 type Entry = { path: string; seconds?: number; at: number; session?: string }
 type Mutes = { session: boolean; project: boolean; global: boolean }
@@ -351,8 +352,7 @@ export default Plugin.define({
     }
 
     const runCommand = (input?: string) => {
-      const parts = (input ?? "").trim().split(/\s+/).filter(Boolean)
-      const verb = (parts[0] ?? "").toLowerCase()
+      const { verb, parts } = parseVoiceInput(input)
       const scope = (parts[1] ?? "session").toLowerCase()
       if (!verb || verb === "open" || verb === "tool") return openTool()
       const session = current()
@@ -372,83 +372,63 @@ export default Plugin.define({
           .catch(() => {})
         return
       }
+      if (verb === "sidebar") return // TUI-only surface
       if (verb === "purge") {
-        const days = parts[1] !== undefined ? Number(parts[1]) : 0
+        const days = parts[1] !== undefined ? Number(parts[1]) : undefined
         void ctx.client
           .rpc(Voice)
-          .purge({ directory: session.directory, sessionID: session.id, days: Number.isFinite(days) ? days : 0 })
+          .purge({
+            directory: session.directory,
+            sessionID: session.id,
+            ...(typeof days === "number" && Number.isFinite(days) ? { days } : {}),
+          })
           .then(() => openTool())
           .catch(() => {})
         return
       }
-      if (verb === "mute" || verb === "unmute") {
+      if (verb === "mute" || verb === "unmute" || verb === "toggle") {
         if (scope !== "session" && scope !== "project" && scope !== "global") return
+        if (verb === "toggle") {
+          void ctx.client
+            .rpc(Voice)
+            .state({ directory: session.directory, sessionID: session.id })
+            .then((current: unknown) => {
+              const mutes = (current as { mutes?: Record<string, boolean> })?.mutes ?? {}
+              const value = !(scope === "global" ? mutes.global : scope === "project" ? mutes.project : mutes.session)
+              return ctx.client
+                .rpc(Voice)
+                .setMute({ directory: session.directory, sessionID: session.id, scope, value })
+            })
+            .catch(() => {})
+          return
+        }
         void ctx.client.rpc(Voice).setMute({
           directory: session.directory,
           sessionID: session.id,
           scope,
           value: verb === "mute",
         })
-        return
       }
     }
 
-    ctx.add(
-      Command,
-      (): Command => ({
-        id: "open",
-        title: "Voice: open audio tool",
-        group: "Voice",
-        keywords: "audio speech tts voice",
-        slash: { name: "voice", arguments: true },
-        featured: true,
-        run: (input) => runCommand(input),
-      }),
-    )
-
-    ctx.add(
-      Command,
-      (): Command => ({
-        id: "repeat",
-        title: "Voice: speak previous reply",
-        group: "Voice",
-        keywords: "again replay last read aloud",
-        run: () => runCommand("repeat"),
-      }),
-    )
-
-    ctx.add(
-      Command,
-      (): Command => ({
-        id: "summary",
-        title: "Voice: summarize where we're at",
-        group: "Voice",
-        keywords: "status recap progress spoken",
-        run: () => runCommand("summary"),
-      }),
-    )
-
-    ctx.add(
-      Command,
-      (): Command => ({
-        id: "purge",
-        title: "Voice: purge generated audio",
-        group: "Voice",
-        keywords: "audio cache cleanup disk space delete",
-        run: () => runCommand("purge"),
-      }),
-    )
-
-    ctx.add(
-      Command,
-      (): Command => ({
-        id: "status",
-        title: "Voice: auto-speak status",
-        group: "Voice",
-        keywords: "audio mute status",
-        run: () => openTool(),
-      }),
-    )
+    for (const spec of VOICE_PALETTE.filter((entry) => entry.clients.includes("gui"))) {
+      ctx.add(
+        Command,
+        (): Command => ({
+          id: spec.id,
+          title: spec.title,
+          group: "Voice",
+          keywords: spec.keywords,
+          ...(spec.id === "open"
+            ? {
+                slash: { name: VOICE_SLASH.name, aliases: [...VOICE_SLASH.aliases], arguments: true as const },
+                featured: true,
+              }
+            : {}),
+          run: (value?: string) => runCommand(value ?? spec.input),
+        }),
+      )
+    }
 
     ctx.add(
       MenuItem,

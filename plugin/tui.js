@@ -305,6 +305,89 @@ var Voice = rpc_exports.define({
   }
 });
 
+// commands.ts
+var VOICE_SLASH = {
+  name: "voice",
+  aliases: ["audio"],
+  usage: "/voice [open|status|mute|unmute|toggle|repeat|summary|purge|sidebar] [session|project|global|days]"
+};
+var VOICE_PALETTE = [
+  {
+    id: "open",
+    title: "Voice: open audio tool",
+    keywords: "audio speech tts panel show",
+    input: "open",
+    clients: ["gui", "tui"]
+  },
+  {
+    id: "status",
+    title: "Voice: show auto-speak status",
+    keywords: "mute muted state",
+    input: "status",
+    clients: ["gui", "tui"]
+  },
+  {
+    id: "repeat",
+    title: "Voice: speak previous reply",
+    keywords: "again replay last read aloud",
+    input: "repeat",
+    clients: ["gui", "tui"]
+  },
+  {
+    id: "summary",
+    title: "Voice: summarize where we're at",
+    keywords: "status recap progress spoken",
+    input: "summary",
+    clients: ["gui", "tui"]
+  },
+  {
+    id: "mute-session",
+    title: "Voice: toggle mute (session)",
+    keywords: "silence quiet this session",
+    input: "toggle session",
+    clients: ["gui", "tui"]
+  },
+  {
+    id: "mute-project",
+    title: "Voice: toggle mute (project)",
+    keywords: "silence quiet project",
+    input: "toggle project",
+    clients: ["gui", "tui"]
+  },
+  {
+    id: "mute-global",
+    title: "Voice: toggle mute (all)",
+    keywords: "silence quiet everything global",
+    input: "toggle global",
+    clients: ["gui", "tui"]
+  },
+  {
+    id: "sidebar",
+    title: "Voice: toggle audio sidebar",
+    keywords: "panel show hide sidebar",
+    input: "sidebar",
+    clients: ["tui"]
+  },
+  {
+    id: "purge-old",
+    title: "Voice: purge audio older than retention",
+    keywords: "cleanup delete cache files",
+    input: "purge",
+    clients: ["gui", "tui"]
+  },
+  {
+    id: "purge-all",
+    title: "Voice: purge all generated audio",
+    keywords: "wipe destructive cache files",
+    input: "purge 0",
+    clients: ["gui", "tui"]
+  }
+];
+function parseVoiceInput(input) {
+  const parts = (input ?? "").trim().split(/\s+/).filter(Boolean);
+  return { verb: (parts[0] ?? "").toLowerCase(), arg: parts[1]?.toLowerCase(), parts };
+}
+
 // src/tui.tsx
 function readIndex(root, limit = 4) {
   try {
@@ -346,9 +429,9 @@ var tui_default = Plugin.define({
       ctx.ui.toast.show({ message: `voice: sidebar ${next ? "shown" : "hidden"}`, variant: "info" });
     };
     const runVoiceCommand = (input) => {
-      const args = (input ?? "").trim().split(/\s+/).filter(Boolean);
-      const verb = (args[0] ?? "").toLowerCase();
-      const scope = args[1] ?? "session";
+      const { verb, parts } = parseVoiceInput(input);
+      const args = parts;
+      const scope = parts[1] ?? "session";
       const validScope = scope === "session" || scope === "project" || scope === "global";
       if (!verb || verb === "open" || verb === "tool") return openAudioTool();
       if (verb === "status") {
@@ -367,8 +450,8 @@ var tui_default = Plugin.define({
         return;
       }
       if (verb === "purge") {
-        const days = args[1] !== void 0 ? Number(args[1]) : 0;
-        void purge(Number.isFinite(days) ? days : 0);
+        const days = args[1] !== void 0 ? Number(args[1]) : void 0;
+        void purge(typeof days === "number" && Number.isFinite(days) ? days : void 0);
         return;
       }
       if (verb === "mute" || verb === "unmute") {
@@ -387,10 +470,7 @@ var tui_default = Plugin.define({
         }
         return toggle(scope);
       }
-      return ctx.ui.toast.show({
-        message: "voice: /voice [open|status|mute|unmute|toggle|sidebar|repeat|summary|purge]",
-        variant: "warning"
-      });
+      return ctx.ui.toast.show({ message: `voice: usage ${VOICE_SLASH.usage}`, variant: "warning" });
     };
     const currentSession = () => {
       const route = ctx.ui.router.current();
@@ -435,73 +515,20 @@ var tui_default = Plugin.define({
       ctx.keymap.layer(() => ({
         mode: "global",
         priority: 10,
-        commands: [
-          {
-            id: "assistant-voice.open",
-            title: "Voice: open audio tool",
-            group: "Voice",
-            palette: true,
-            slash: { name: "voice", aliases: ["audio"], arguments: true },
-            run: (input) => runVoiceCommand(input)
-          },
-          {
-            id: "assistant-voice.sidebar",
-            title: "Voice: toggle audio sidebar",
-            group: "Voice",
-            palette: true,
-            run: toggleSidebar
-          },
-          {
-            id: "assistant-voice.mute-session",
-            title: "Voice: toggle mute (session)",
-            group: "Voice",
-            palette: true,
-            run: () => toggle("session")
-          },
-          {
-            id: "assistant-voice.mute-project",
-            title: "Voice: toggle mute (project)",
-            group: "Voice",
-            palette: true,
-            run: () => toggle("project")
-          },
-          {
-            id: "assistant-voice.mute-global",
-            title: "Voice: toggle mute (all)",
-            group: "Voice",
-            palette: true,
-            run: () => toggle("global")
-          },
-          {
-            id: "assistant-voice.repeat",
-            title: "Voice: speak previous reply",
-            group: "Voice",
-            palette: true,
-            run: () => runVoiceCommand("repeat")
-          },
-          {
-            id: "assistant-voice.summary",
-            title: "Voice: summarize where we're at",
-            group: "Voice",
-            palette: true,
-            run: () => runVoiceCommand("summary")
-          },
-          {
-            id: "assistant-voice.purge",
-            title: "Voice: purge generated audio",
-            group: "Voice",
-            palette: true,
-            run: () => void purge(0)
-          },
-          {
-            id: "assistant-voice.status",
-            title: "Voice: show auto-speak status",
-            group: "Voice",
-            palette: true,
-            run: () => ctx.ui.toast.show({ message: `voice: ${statusLine()}`, variant: "info" })
-          }
-        ],
-        bindings: []
+        commands: VOICE_PALETTE.filter((entry2) => entry2.clients.includes("tui")).map((spec) => ({
+          id: `assistant-voice.${spec.id}`,
+          title: spec.title,
+          group: "Voice",
+          palette: true,
+          ...spec.id === "open" ? {
+            slash: {
+              name: VOICE_SLASH.name,
+              aliases: [...VOICE_SLASH.aliases],
+              arguments: true
+            }
+          } : {},
+          run: (value) => runVoiceCommand(value ?? spec.input)
+        }))
       }));
     } catch {
     }

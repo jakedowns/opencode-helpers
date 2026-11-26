@@ -141,7 +141,18 @@ the host.
 
 ### `/voice` slash commands
 
-The palette group and the slash command share one dispatcher:
+Palette entries and the `/voice` dispatcher are generated from one definition in
+`plugin/commands.ts` (`VOICE_PALETTE`, `VOICE_SLASH`), so the GUI and TUI cannot
+drift. The only intentional difference is `sidebar`, which is TUI-only:
+
+| Palette entry | GUI | TUI |
+|---|---|---|
+| open audio tool, status, repeat, summary | ✓ | ✓ |
+| toggle mute (session / project / all) | ✓ | ✓ |
+| purge older (retention), purge all | ✓ | ✓ |
+| toggle audio sidebar | — | ✓ |
+
+The dispatcher itself:
 
 | Command | Effect |
 |---|---|

@@ -15,6 +15,7 @@ import { createSignal } from "solid-js"
 import { Plugin } from "@opencode/plugin/tui"
 import { readState, resolveMutes, setMute, setSidebar } from "../state.ts"
 import { Voice } from "../rpc.ts"
+import { VOICE_PALETTE, VOICE_SLASH, parseVoiceInput } from "../commands.ts"
 
 type Scope = "session" | "project" | "global"
 type IndexEntry = { path: string; seconds?: number; at: number; session?: string }
@@ -73,9 +74,9 @@ export default Plugin.define({
      *   /voice sidebar
      */
     const runVoiceCommand = (input?: string) => {
-      const args = (input ?? "").trim().split(/\s+/).filter(Boolean)
-      const verb = (args[0] ?? "").toLowerCase()
-      const scope = (args[1] ?? "session") as Scope
+      const { verb, parts } = parseVoiceInput(input)
+      const args = parts
+      const scope = (parts[1] ?? "session") as Scope
       const validScope = scope === "session" || scope === "project" || scope === "global"
 
       if (!verb || verb === "open" || verb === "tool") return openAudioTool()
@@ -97,8 +98,8 @@ export default Plugin.define({
         return
       }
       if (verb === "purge") {
-        const days = args[1] !== undefined ? Number(args[1]) : 0
-        void purge(Number.isFinite(days) ? days : 0)
+        const days = args[1] !== undefined ? Number(args[1]) : undefined
+        void purge(typeof days === "number" && Number.isFinite(days) ? days : undefined)
         return
       }
       if (verb === "mute" || verb === "unmute") {
@@ -117,10 +118,7 @@ export default Plugin.define({
         }
         return toggle(scope)
       }
-      return ctx.ui.toast.show({
-        message: "voice: /voice [open|status|mute|unmute|toggle|sidebar|repeat|summary|purge]",
-        variant: "warning",
-      })
+      return ctx.ui.toast.show({ message: `voice: usage ${VOICE_SLASH.usage}`, variant: "warning" })
     }
 
     const currentSession = (): string | undefined => {
@@ -209,73 +207,22 @@ export default Plugin.define({
       ctx.keymap.layer(() => ({
         mode: "global",
         priority: 10,
-        commands: [
-          {
-            id: "assistant-voice.open",
-            title: "Voice: open audio tool",
-            group: "Voice",
-            palette: true,
-            slash: { name: "voice", aliases: ["audio"], arguments: true },
-            run: (input?: string) => runVoiceCommand(input),
-          },
-          {
-            id: "assistant-voice.sidebar",
-            title: "Voice: toggle audio sidebar",
-            group: "Voice",
-            palette: true,
-            run: toggleSidebar,
-          },
-          {
-            id: "assistant-voice.mute-session",
-            title: "Voice: toggle mute (session)",
-            group: "Voice",
-            palette: true,
-            run: () => toggle("session"),
-          },
-          {
-            id: "assistant-voice.mute-project",
-            title: "Voice: toggle mute (project)",
-            group: "Voice",
-            palette: true,
-            run: () => toggle("project"),
-          },
-          {
-            id: "assistant-voice.mute-global",
-            title: "Voice: toggle mute (all)",
-            group: "Voice",
-            palette: true,
-            run: () => toggle("global"),
-          },
-          {
-            id: "assistant-voice.repeat",
-            title: "Voice: speak previous reply",
-            group: "Voice",
-            palette: true,
-            run: () => runVoiceCommand("repeat"),
-          },
-          {
-            id: "assistant-voice.summary",
-            title: "Voice: summarize where we're at",
-            group: "Voice",
-            palette: true,
-            run: () => runVoiceCommand("summary"),
-          },
-          {
-            id: "assistant-voice.purge",
-            title: "Voice: purge generated audio",
-            group: "Voice",
-            palette: true,
-            run: () => void purge(0),
-          },
-          {
-            id: "assistant-voice.status",
-            title: "Voice: show auto-speak status",
-            group: "Voice",
-            palette: true,
-            run: () => ctx.ui.toast.show({ message: `voice: ${statusLine()}`, variant: "info" }),
-          },
-        ],
-        bindings: [],
+        commands: VOICE_PALETTE.filter((entry) => entry.clients.includes("tui")).map((spec) => ({
+          id: `assistant-voice.${spec.id}`,
+          title: spec.title,
+          group: "Voice",
+          palette: true,
+          ...(spec.id === "open"
+            ? {
+                slash: {
+                  name: VOICE_SLASH.name,
+                  aliases: [...VOICE_SLASH.aliases],
+                  arguments: true as const,
+                },
+              }
+            : {}),
+          run: (value?: string) => runVoiceCommand(value ?? spec.input),
+        })),
       }))
     } catch {
       /* a TUI without keymap support still gets the buttons */
