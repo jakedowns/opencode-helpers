@@ -16,7 +16,11 @@ Shared host adapter for the nudge engine.
 - unified `nudge.json` loader with global/project merge and legacy fallback
 - 14 adapter tests (gate + tool + config)
 
-**Still to do:** OpenCode hook wiring, one shared timer, registration race
-handling, cross-process concurrency stress, and producer integration.
+**Phase 2c (done):**
+- `attachNudge(ctx, options)`: host wiring, one 5s timer, prompt reset,
+  idle/tool callbacks, first-loader `nudge` tool registration
+- 16 adapter tests (gate + tool + config + host)
+
+**Still to do:** cross-process concurrency stress and producer integration.
 
 Tests: 8 adapter cases (`npm test` once dependencies are installed).

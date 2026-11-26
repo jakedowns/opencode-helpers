@@ -252,6 +252,15 @@ export function createNudgeAdapter(host: NudgeHost, options: NudgeAdapterOptions
       });
     },
 
+    async reset(sessionID) {
+      withState(file, (state) => {
+        const session = (state.sessions[sessionID] ??= emptySession());
+        session.fires = 0;
+        session.lastReminderAt = 0;
+        delete session.standing;
+      });
+    },
+
     status(sessionID): NudgeAdapterStatus {
       const state = readState(file);
       const session = state.sessions[sessionID] ?? emptySession();

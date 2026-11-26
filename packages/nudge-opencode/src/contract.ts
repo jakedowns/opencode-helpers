@@ -49,4 +49,6 @@ export interface NudgeAdapter {
   mute(sessionID: string, minutes: number): Promise<void> | void;
   unmute(sessionID: string): Promise<void> | void;
   status(sessionID: string): NudgeAdapterStatus;
+  /** Prompt reset: clear standing/fires; preserve mute and last progress. */
+  reset(sessionID: string): Promise<void> | void;
 }
