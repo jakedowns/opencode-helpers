@@ -113,7 +113,18 @@ function AudioPanel(props: { session: Session }) {
   }
 
   return (
-    <div style={{ display: "flex", "flex-direction": "column", gap: "8px", padding: "12px", "font-size": "12px" }}>
+    <div
+      style={{
+        display: "flex",
+        "flex-direction": "column",
+        gap: "8px",
+        padding: "12px",
+        "font-size": "12px",
+        height: "100%",
+        "box-sizing": "border-box",
+        "min-height": "0",
+      }}
+    >
       <div style={{ display: "flex", "justify-content": "space-between", "align-items": "center" }}>
         <strong>Audio</strong>
         <button type="button" onClick={() => void refresh()}>
@@ -181,7 +192,18 @@ function AudioPanel(props: { session: Session }) {
         </div>
       </Show>
       <Show when={state()?.entries.length} fallback={<div style={{ opacity: 0.6 }}>No audio yet.</div>}>
-        <div style={{ display: "flex", "flex-direction": "column", gap: "4px" }}>
+        <div
+          style={{
+            display: "flex",
+            "flex-direction": "column",
+            gap: "4px",
+            "overflow-y": "auto",
+            "overflow-x": "hidden",
+            flex: "1 1 auto",
+            "min-height": "0",
+            "padding-right": "4px",
+          }}
+        >
           <For each={state()?.entries ?? []}>
             {(entry: Entry) => (
               <div style={{ display: "flex", "align-items": "center", gap: "8px" }}>
