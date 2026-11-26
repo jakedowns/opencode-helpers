@@ -14,7 +14,17 @@ type Entry = { path: string; seconds?: number; at: number; session?: string }
 type Mutes = { session: boolean; project: boolean; global: boolean }
 type Purge = { at: number; removed: number; bytes: number }
 type Cache = { at: number; files: number; bytes: number }
-type State = { entries: Entry[]; mutes: Mutes; sidebar: boolean; cache?: Cache; lastPurge?: Purge }
+type Audio = { at: number; available: boolean; muted: boolean; volume: number }
+type QueueStats = { queued: number; playing: number; failed: number }
+type State = {
+  entries: Entry[]
+  mutes: Mutes
+  sidebar: boolean
+  cache?: Cache
+  audio?: Audio
+  queue?: QueueStats
+  lastPurge?: Purge
+}
 
 type Session = { id: string; directory: string }
 
@@ -99,6 +109,16 @@ function AudioPanel(props: { session: Session }) {
         <div style={{ opacity: 0.7 }}>
           Cache: {formatBytes(state()?.cache?.bytes ?? 0)} · {state()?.cache?.files ?? 0} file
           {(state()?.cache?.files ?? 0) === 1 ? "" : "s"}
+        </div>
+      </Show>
+      <Show when={state()?.queue}>
+        <div style={{ opacity: 0.7 }}>
+          Queue: {state()?.queue?.queued ?? 0} queued · {state()?.queue?.playing ?? 0} playing
+        </div>
+      </Show>
+      <Show when={state()?.audio}>
+        <div style={{ opacity: 0.7 }}>
+          Output: {state()?.audio?.muted ? "muted" : `${Math.round((state()?.audio?.volume ?? 0) * 100)}%`}
         </div>
       </Show>
       <div style={{ display: "flex", gap: "6px", "flex-wrap": "wrap" }}>

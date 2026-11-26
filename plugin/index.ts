@@ -24,13 +24,14 @@ import {
 } from "node:fs"
 import path from "node:path"
 import { Plugin } from "@opencode/plugin"
-import { readState, resolveMutes, setCache, setLastPurge, setMute, setSidebar } from "./state.ts"
+import { readState, resolveMutes, setAudio, setCache, setLastPurge, setMute, setQueue, setSidebar } from "./state.ts"
 import { Voice } from "./rpc.ts"
 
 type Mode = "host" | "client" | "remote"
 
 type Options = {
   mode?: Mode
+  autoUnmute?: boolean
   root?: string
   auto?: boolean
   maxChars?: number
@@ -241,6 +242,8 @@ async function purgeGenerated(
   {
     const usage = cacheUsage(dir)
     setCache(root, usage.files, usage.bytes)
+    setQueue(root, queueCounts())
+    setAudio(root, await audioStatus())
   }
   return { ...result, freed: formatBytes(result.bytes) }
 }
@@ -386,6 +389,8 @@ async function speakDurable(
   {
     const usage = cacheUsage(outputDir)
     setCache(root, usage.files, usage.bytes)
+    setQueue(root, queueCounts())
+    setAudio(root, await audioStatus())
   }
   return {
     title: resolvedTitle,
@@ -492,6 +497,38 @@ function readIndex(root: string, limit = 20): IndexEntry[] {
   }
 }
 
+type AudioStatus = { at: number; available: boolean; muted: boolean; volume: number }
+let audioCache: { at: number; value: AudioStatus } | null = null
+
+async function audioStatus(): Promise<AudioStatus> {
+  if (audioCache && Date.now() - audioCache.at < 5000) return audioCache.value
+  const result = await run("wpctl", ["get-volume", "@DEFAULT_AUDIO_SINK@"], { timeoutMs: 3000 })
+  let available = false
+  let muted = false
+  let volume = 0
+  if (result.code === 0) {
+    available = true
+    const match = result.stdout.match(/Volume:\s*([0-9.]+)/)
+    if (match) volume = Number(match[1]) || 0
+    muted = /MUTED/.test(result.stdout)
+  }
+  const value = { at: Date.now(), available, muted, volume }
+  audioCache = { at: Date.now(), value }
+  return value
+}
+
+function queueCounts(): { queued: number; playing: number; failed: number } {
+  const dir = process.env.AUDIOQ_DIR || "/tmp/opencode/audio-replies/queue"
+  const count = (sub: string): number => {
+    try {
+      return readdirSync(sub ? path.join(dir, sub) : dir).filter((name) => name.endsWith(".wav")).length
+    } catch {
+      return 0
+    }
+  }
+  return { queued: count(""), playing: count("playing"), failed: count("failed") }
+}
+
 function cacheUsage(dir: string): { files: number; bytes: number } {
   let files = 0
   let bytes = 0
@@ -518,6 +555,8 @@ async function voiceState(root: string, directory: string, sessionID?: string) {
   const config = await readConfig(root, directory)
   const outputDir = config.output?.directory || DEFAULT_OUTPUT_DIR
   const cache = { at: Date.now(), ...cacheUsage(outputDir) }
+  const audio = await audioStatus()
+  const queue = queueCounts()
   // Optional fields must be absent, not null: RPC validates the encoded JSON,
   // and `undefined` becomes `null`, which fails the declared type.
   const entries = readIndex(root).map((entry) => {
@@ -534,12 +573,16 @@ async function voiceState(root: string, directory: string, sessionID?: string) {
     mutes: ReturnType<typeof resolveMutes>
     sidebar: boolean
     cache: { files: number; bytes: number }
+    audio: AudioStatus
+    queue: { queued: number; playing: number; failed: number }
     lastPurge?: { at: number; removed: number; bytes: number }
   } = {
     entries,
     mutes: resolveMutes(state, directory, sessionID),
     sidebar: state.sidebar,
     cache,
+    audio,
+    queue,
   }
   if (state.lastPurge) result.lastPurge = state.lastPurge
   return result
@@ -670,6 +713,22 @@ export default Plugin.define({
     if (mode === "host") {
       cleanups.push(startRequestWatcher(root, location))
       log("host mode: watching .voice-requests")
+
+      const status = await audioStatus()
+      setAudio(root, status)
+      setQueue(root, queueCounts())
+      if (status.muted || status.volume === 0) {
+        if (options.autoUnmute === true) {
+          await run("wpctl", ["set-mute", "@DEFAULT_AUDIO_SINK@", "0"], { timeoutMs: 3000 })
+          if (status.volume === 0) {
+            await run("wpctl", ["set-volume", "@DEFAULT_AUDIO_SINK@", "0.7"], { timeoutMs: 3000 })
+          }
+          audioCache = null
+          log("output was silent; unmuted the default sink")
+        } else {
+          log(`warning: output sink is ${status.muted ? "muted" : "at zero volume"}`)
+        }
+      }
 
       const retention = retentionFor(await readConfig(root, location))
       const sweep = () => {

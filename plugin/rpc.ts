@@ -35,6 +35,27 @@ const state = {
     entries: { type: "array", items: entry },
     mutes,
     sidebar: { type: "boolean" },
+    queue: {
+      type: "object",
+      properties: {
+        queued: { type: "number" },
+        playing: { type: "number" },
+        failed: { type: "number" },
+      },
+      required: ["queued", "playing", "failed"],
+      additionalProperties: false,
+    },
+    audio: {
+      type: "object",
+      properties: {
+        at: { type: "number" },
+        available: { type: "boolean" },
+        muted: { type: "boolean" },
+        volume: { type: "number" },
+      },
+      required: ["at", "available", "muted", "volume"],
+      additionalProperties: false,
+    },
     cache: {
       type: "object",
       properties: {

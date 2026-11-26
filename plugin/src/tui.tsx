@@ -141,12 +141,17 @@ export default Plugin.define({
 
     const AudioToolPage = () => {
       const entries = readIndex(root, 12)
-      const cache = readState(root).cache
+      const stored = readState(root)
+      const cache = stored.cache
+      const queue = stored.queue
+      const audio = stored.audio
       return (
         <box flexDirection="column" padding={1} gap={1}>
           <text>Audio tool</text>
           <text>{statusLine()}</text>
           {cache ? <text>{`cache ${formatBytes(cache.bytes)} · ${cache.files} file${cache.files === 1 ? "" : "s"}`}</text> : null}
+          {queue ? <text>{`queue ${queue.queued} · playing ${queue.playing}`}</text> : null}
+          {audio ? <text>{`output ${audio.muted ? "MUTED" : `${Math.round(audio.volume * 100)}%`}`}</text> : null}
           <box flexDirection="column">
             <text>Recent</text>
             {entries.length === 0 ? (
@@ -252,7 +257,10 @@ export default Plugin.define({
         render: () => {
           if (!sidebarVisible()) return null
           const entries = readIndex(root)
-          const cache = readState(root).cache
+          const stored = readState(root)
+          const cache = stored.cache
+          const queue = stored.queue
+          const audio = stored.audio
           return (
             <box flexDirection="column">
               <box onMouseDown={openAudioTool}>
@@ -264,6 +272,8 @@ export default Plugin.define({
               {cache ? (
                 <text>{`  cache ${formatBytes(cache.bytes)} · ${cache.files} file${cache.files === 1 ? "" : "s"}`}</text>
               ) : null}
+              {queue ? <text>{`  queue ${queue.queued} · playing ${queue.playing}`}</text> : null}
+              {audio ? <text>{`  output ${audio.muted ? "MUTED" : `${Math.round(audio.volume * 100)}%`}`}</text> : null}
             </box>
           )
         },

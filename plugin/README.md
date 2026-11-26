@@ -117,6 +117,7 @@ the host.
 | `auto` | `true` when `.dev/audiomode.jsonc` exists | speak each finished reply |
 | `maxChars` | `2000` | skip replies whose sanitised text is longer |
 | `emptyNotice` | `{session} here: my last message was untranscribable, check the app` | spoken when sanitising removes everything |
+| `autoUnmute` | `false` | on host start, unmute the default sink (and lift it off zero) when it would play silently |
 
 ## What works
 
@@ -191,9 +192,18 @@ The result is written to `.voice-state.json` (`lastPurge`) so every client can
 show "removed N files, freed X MB"; the slash/palette path in the TUI and GUI
 shows it immediately, and the Audio panel displays the last result.
 
-Both clients also show current cache usage: the GUI Audio panel and the TUI
-sidebar render `Cache: 12.3 MB · 15 files`, computed from the reply files in
-`output.directory` (RPC `cache` for the GUI, `.voice-state.json` for the TUI).
+Both clients also show live state in the GUI Audio panel and TUI sidebar:
+
+```
+Cache: 4.3 MB · 7 files
+Queue: 0 queued · 0 playing
+Output: 70%            # or "muted"
+```
+
+`cache` comes from the reply files in `output.directory`, `queue` from the
+audioq queue directories, and `audio` from `wpctl get-volume` on the default
+sink. The GUI reads them over RPC; the TUI reads `.voice-state.json`, which the
+host refreshes after every speak, purge and sweep.
 
 ## What is not implemented yet
 

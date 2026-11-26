@@ -12,6 +12,8 @@ export type Scope = "session" | "project" | "global"
 
 export type LastPurge = { at: number; removed: number; bytes: number }
 export type CacheStats = { at: number; files: number; bytes: number }
+export type AudioStatus = { at: number; available: boolean; muted: boolean; volume: number }
+export type QueueStats = { at: number; queued: number; playing: number; failed: number }
 
 export type VoiceState = {
   global: boolean
@@ -20,6 +22,8 @@ export type VoiceState = {
   sidebar: boolean
   lastPurge?: LastPurge
   cache?: CacheStats
+  audio?: AudioStatus
+  queue?: QueueStats
 }
 
 const EMPTY: VoiceState = { global: false, projects: {}, sessions: {}, sidebar: true }
@@ -36,6 +40,24 @@ export function readState(root: string): VoiceState {
       projects: parsed?.projects && typeof parsed.projects === "object" ? parsed.projects : {},
       sessions: parsed?.sessions && typeof parsed.sessions === "object" ? parsed.sessions : {},
       sidebar: parsed?.sidebar !== false,
+      queue:
+        parsed?.queue && typeof parsed.queue.at === "number"
+          ? {
+              at: parsed.queue.at,
+              queued: Number(parsed.queue.queued) || 0,
+              playing: Number(parsed.queue.playing) || 0,
+              failed: Number(parsed.queue.failed) || 0,
+            }
+          : undefined,
+      audio:
+        parsed?.audio && typeof parsed.audio.at === "number"
+          ? {
+              at: parsed.audio.at,
+              available: parsed.audio.available === true,
+              muted: parsed.audio.muted === true,
+              volume: Number(parsed.audio.volume) || 0,
+            }
+          : undefined,
       cache:
         parsed?.cache && typeof parsed.cache.at === "number"
           ? {
@@ -105,5 +127,17 @@ export function setLastPurge(root: string, removed: number, bytes: number): Voic
 export function setCache(root: string, files: number, bytes: number): VoiceState {
   const state = readState(root)
   state.cache = { at: Date.now(), files, bytes }
+  return writeState(root, state)
+}
+
+export function setAudio(root: string, status: AudioStatus): VoiceState {
+  const state = readState(root)
+  state.audio = { ...status, at: Date.now() }
+  return writeState(root, state)
+}
+
+export function setQueue(root: string, counts: { queued: number; playing: number; failed: number }): VoiceState {
+  const state = readState(root)
+  state.queue = { at: Date.now(), ...counts }
   return writeState(root, state)
 }
