@@ -243,9 +243,14 @@ The queue line names the session whose reply is playing, using `--session` on
 `audioq.py enqueue`. A client-supplied title is carried through the request file
 (`sessionTitle`) and used for both the preamble and the queue sidecar, so the
 Mac's session name survives the hop. Host stats refresh every 5 s. Each row in the
-GUI panel has an **✕** that deletes that reply from disk and from the index;
-only paths present in the index can be removed, and both `.wav`/`.mp3` variants
-of that basename go.
+GUI panel has an **✕** button that deletes that reply from disk and from the
+index; only paths present in the index can be removed, and both `.wav`/`.mp3`
+variants of that basename go.
+
+Purge is split in two styled buttons: **Purge older** applies the retention
+policy, **Purge all** ignores it and is marked as destructive (red border).
+Mute toggles, the auto-speak toggle, Refresh and the per-row ✕ share the same
+button style, with hover/active states and pressed styling for active mutes.
 
 ## What is not implemented yet
 

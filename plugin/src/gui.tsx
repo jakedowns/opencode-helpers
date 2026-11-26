@@ -87,10 +87,14 @@ function AudioPanel(props: { session: Session }) {
       .then((next: unknown) => setState(next as State))
       .catch(() => {})
 
-  const purge = () =>
+  const purge = (days?: number) =>
     ctx.client
       .rpc(Voice)
-      .purge({ directory: props.session.directory, sessionID: props.session.id, days: 0 })
+      .purge({
+        directory: props.session.directory,
+        sessionID: props.session.id,
+        ...(typeof days === "number" ? { days } : {}),
+      })
       .then((next: unknown) => setState(next as State))
       .catch(() => {})
 
@@ -155,14 +159,34 @@ function AudioPanel(props: { session: Session }) {
         "min-height": "0",
       }}
     >
+      <style>{`
+        .voice-btn {
+          padding: 4px 10px;
+          border: 1px solid currentColor;
+          border-radius: 4px;
+          background: rgba(127, 127, 127, 0.12);
+          color: inherit;
+          font: inherit;
+          font-size: 12px;
+          line-height: 1.4;
+          cursor: pointer;
+        }
+        .voice-btn:hover { background: rgba(127, 127, 127, 0.22); }
+        .voice-btn:active { background: rgba(127, 127, 127, 0.32); }
+        .voice-btn[data-danger="true"] { border-color: #c0504d; color: #c0504d; }
+        .voice-btn[data-danger="true"]:hover { background: rgba(192, 80, 77, 0.18); }
+        .voice-btn[aria-pressed="true"] { background: rgba(127, 127, 127, 0.3); font-weight: 600; }
+        .voice-btn-icon { padding: 0 6px; }
+      `}</style>
       <div style={{ display: "flex", "justify-content": "space-between", "align-items": "center" }}>
         <strong>Audio</strong>
-        <button type="button" onClick={() => void refresh()}>
+        <button type="button" className="voice-btn" onClick={() => void refresh()}>
           Refresh
         </button>
       </div>
       <button
         type="button"
+        className="voice-btn"
         aria-pressed={!!activeMute()}
         title={activeMute() ? "Turn auto-speak back on" : "Mute auto-speak everywhere"}
         onClick={() => void quickToggle()}
@@ -171,8 +195,6 @@ function AudioPanel(props: { session: Session }) {
           "justify-content": "space-between",
           "align-items": "center",
           gap: "8px",
-          padding: "4px 8px",
-          "font-weight": activeMute() ? "bold" : "normal",
         }}
       >
         <span>
@@ -222,30 +244,39 @@ function AudioPanel(props: { session: Session }) {
       <div style={{ display: "flex", gap: "6px", "flex-wrap": "wrap" }}>
         <button
           type="button"
+          className="voice-btn"
           aria-pressed={state()?.mutes.session === true}
           onClick={() => toggle("session")}
-          style={{ "font-weight": state()?.mutes.session ? "bold" : "normal" }}
         >
           {muteLabel("session", state()?.mutes.session)}
         </button>
         <button
           type="button"
+          className="voice-btn"
           aria-pressed={state()?.mutes.project === true}
           onClick={() => toggle("project")}
-          style={{ "font-weight": state()?.mutes.project ? "bold" : "normal" }}
         >
           {muteLabel("project", state()?.mutes.project)}
         </button>
         <button
           type="button"
+          className="voice-btn"
           aria-pressed={state()?.mutes.global === true}
           onClick={() => toggle("global")}
-          style={{ "font-weight": state()?.mutes.global ? "bold" : "normal" }}
         >
           {muteLabel("global", state()?.mutes.global)}
         </button>
-        <button type="button" onClick={() => void purge()}>
-          Purge audio
+        <button type="button" className="voice-btn" title="Delete replies older than the retention policy" onClick={() => void purge()}>
+          Purge older
+        </button>
+        <button
+          type="button"
+          className="voice-btn"
+          data-danger="true"
+          title="Delete every generated reply, ignoring retention"
+          onClick={() => void purge(0)}
+        >
+          Purge all
         </button>
       </div>
       <Show when={purgeText()}>
@@ -283,10 +314,10 @@ function AudioPanel(props: { session: Session }) {
                 </span>
                 <button
                   type="button"
+                  className="voice-btn voice-btn-icon"
                   title="Delete this file from disk"
                   aria-label={`Delete ${entryLabel(entry)}`}
                   onClick={() => void remove(entry.path)}
-                  style={{ padding: "0 6px", "line-height": "1.4" }}
                 >
                   ✕
                 </button>
