@@ -30,5 +30,6 @@
     "src",
     "README.md",
     "PROPOSAL.md"
-  ]
+  ],
+  "name": "assistant-voice-opencode-plugin"
 }
