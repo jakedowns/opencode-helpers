@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+*.egg-info/
+
+# OS clutter
+.DS_Store
+._*
+Thumbs.db
+desktop.ini
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
+
+# Sockets, locks, partial writes
+*.sock
+.drain.lock
+.play.lock
+.dedupe.lock
+*.part
+*.tmp
+
+# Logs
+*.log
+
+# Local secrets (pairing keys and the like live under .dev/, but be safe)
+.env
+.env.*
+
+# Per-project agent preferences, not project behaviour. Copy
+# audiomode.example.jsonc here (see AGENTS.md); never commit it.
+.dev/
+
+# Fetched and generated: run ./fetch.sh to populate. None of this is source,
+# and two voices exceed GitHub's 100 MB per-file limit anyway.
+piper/
+voices/
+audio-replies/
+
+# Plugin runtime state (mutes, recent-audio index)
+.voice-state.json
+.voice-index.json
+
+# Plugin build deps
+plugin/node_modules/
+
+# Cross-host speech requests (shared folder bus)
+.voice-requests/
