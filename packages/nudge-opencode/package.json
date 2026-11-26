@@ -1,6 +1,6 @@
 {
   "name": "@jakedowns/opencode-nudge",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "OpenCode host adapter for shared nudge policy",
   "main": "./dist/index.js",
@@ -15,7 +15,7 @@
     "prepublishOnly": "npm test && npm run build"
   },
   "dependencies": {
-    "@jakedowns/opencode-nudge-core": "^0.1.0"
+    "@jakedowns/opencode-nudge-core": "^0.1.1"
   },
   "publishConfig": {
     "access": "public"
