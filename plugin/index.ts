@@ -481,17 +481,29 @@ function readIndex(root: string, limit = 20): IndexEntry[] {
 
 function voiceState(root: string, directory: string, sessionID?: string) {
   const state = readState(root)
-  return {
-    entries: readIndex(root).map((entry) => ({
+  // Optional fields must be absent, not null: RPC validates the encoded JSON,
+  // and `undefined` becomes `null`, which fails the declared type.
+  const entries = readIndex(root).map((entry) => {
+    const row: { path: string; at: number; seconds?: number; session?: string } = {
       path: entry.path,
-      seconds: entry.seconds,
       at: entry.at,
-      session: entry.session,
-    })),
+    }
+    if (typeof entry.seconds === "number") row.seconds = entry.seconds
+    if (typeof entry.session === "string" && entry.session) row.session = entry.session
+    return row
+  })
+  const result: {
+    entries: typeof entries
+    mutes: ReturnType<typeof resolveMutes>
+    sidebar: boolean
+    lastPurge?: { at: number; removed: number; bytes: number }
+  } = {
+    entries,
     mutes: resolveMutes(state, directory, sessionID),
     sidebar: state.sidebar,
-    lastPurge: state.lastPurge,
   }
+  if (state.lastPurge) result.lastPurge = state.lastPurge
+  return result
 }
 
 type RequestResult = { requested: true; id: string }
