@@ -31,6 +31,8 @@ export interface NudgeTarget {
  * detection and product copy; the gate owns whether/how it is delivered.
  */
 export interface NudgeCandidate {
+  /** Session the reminder belongs to. */
+  sessionId: string;
   /** Stable producer identity, e.g. progress.tree, progress.relay, say, voice. */
   producer: string;
   /** Rule id within the producer. */

@@ -1,14 +1,17 @@
 # @jakedowns/opencode-nudge
 
-OpenCode host adapter for the shared nudge engine.
+Shared host adapter for the nudge engine.
 
-Phase 0 exposes the adapter contract. Phase 2 implements:
+**Phase 2a (done):** `createNudgeAdapter(host, options)`
 
-- host hooks (prompt, context/steps, tool.execute.after, idle)
-- one shared timer
-- shared state file with atomic lock
-- one `nudge` standing context key
-- synthetic delivery for block (and experiment arms)
-- one `nudge` agent tool
+- shared `~/.config/opencode/nudge-state.json` with atomic lock
+- one standing `nudge` key, legacy `progress-reminder` cleanup
+- mute, gap, grace, per-session cap, duplicate/priority
+- context delivery; synthetic only for `block`
+- per-session touch/clear/status
+- basic fire/suppress telemetry through `host.log`
 
-Do not add producer signal logic here.
+**Still to do:** OpenCode hook wiring, one shared timer, one `nudge` agent tool,
+registration race handling, config loader, cross-process concurrency stress.
+
+Tests: 8 adapter cases (`npm test` once dependencies are installed).
