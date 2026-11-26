@@ -1,0 +1,16 @@
+// Load the local plugin for sessions in this repository.
+// Auto-speak stays off until the tool is proven; the voice_speak tool works now.
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": [
+    {
+      "package": "./plugin",
+      "options": {
+        "root": "/media/share/opencode-audio-tool",
+        "auto": false,
+        "maxChars": 2000,
+        "emptyNotice": "{session} here: my last message was untranscribable, check the app"
+      }
+    }
+  ]
+}

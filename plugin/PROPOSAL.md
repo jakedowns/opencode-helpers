@@ -130,7 +130,11 @@ Two guards on top: a sentence that loses more than half its characters to the
 filter is dropped rather than read as a fragment (the `agent-voice` rule), and
 the **sanitised** text must fit `maxChars` (default 2000, compared after
 filtering). Above that the reply is skipped with a logged reason — truncating
-mid-thought is worse than silence, and summarisation is a 0.2 feature.
+mid-thought is worse than silence, and summarisation is a 0.2 feature. If
+filtering removes everything (a reply that is only code or tables), the plugin
+speaks one short sentence instead of nothing — "The response was all code, so
+there is nothing to read aloud." — and logs the original length. Silence with
+no explanation is indistinguishable from a broken plugin.
 
 ### Where the audio link lives
 

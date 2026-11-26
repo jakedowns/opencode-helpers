@@ -1,0 +1,17 @@
+{
+  "name": "assistant-voice-opencode-plugin",
+  "version": "0.0.1",
+  "description": "Local text-to-speech for OpenCode replies through the Piper queue",
+  "type": "module",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "dependencies": {
+    "@opencode/plugin": "^2.3.0"
+  },
+  "files": [
+    "index.ts",
+    "README.md",
+    "PROPOSAL.md"
+  ]
+}

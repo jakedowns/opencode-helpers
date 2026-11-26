@@ -38,6 +38,9 @@ linux-piper-helper/
   audiomode.example.jsonc  template for ./.dev/audiomode.jsonc (git-ignored copy)
   docs/remote-audio-pairing.md  away profile: pairing, tunnel, back-port plan
   plugin/PROPOSAL.md       proposal: assistant-voice-opencode-plugin v0.0.1 (MVP)
+  plugin/index.ts          server part: voice_speak tool + auto-speak hook (stub)
+  plugin/README.md         load locally, options, what works and what does not
+  opencode.jsonc           loads ./plugin for sessions in this repository
 ```
 
 Size on disk: ~522 MB.
