@@ -11,7 +11,12 @@ Shared host adapter for the nudge engine.
 - per-session touch/clear/status
 - basic fire/suppress telemetry through `host.log`
 
-**Still to do:** OpenCode hook wiring, one shared timer, one `nudge` agent tool,
-registration race handling, config loader, cross-process concurrency stress.
+**Phase 2b (done):**
+- generic `nudge` agent tool (`status|mute|unmute|clear`) in `tool.ts`
+- unified `nudge.json` loader with global/project merge and legacy fallback
+- 14 adapter tests (gate + tool + config)
+
+**Still to do:** OpenCode hook wiring, one shared timer, registration race
+handling, cross-process concurrency stress, and producer integration.
 
 Tests: 8 adapter cases (`npm test` once dependencies are installed).
