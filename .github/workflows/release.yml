@@ -1,0 +1,100 @@
+# Publish shared helpers with npm trusted publishing (OIDC).
+#
+# npmjs.com setup, per package:
+#   Package -> Settings -> Trusted publishing -> GitHub Actions
+#     Organization/user: jakedowns
+#     Repository:        opencode-helpers
+#     Workflow filename: release.yml
+#
+# Tags:
+#   nudge-core@0.1.0
+#   nudge-opencode@0.1.0
+name: Release
+
+on:
+  push:
+    tags:
+      - nudge-core@*
+      - nudge-opencode@*
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag (for example nudge-core@0.1.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'jakedowns/opencode-helpers'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Upgrade npm for trusted publishing
+        run: npm install --global npm@^11.5.1
+
+      - name: Resolve package from tag
+        run: |
+          set -euo pipefail
+          case "$RELEASE_TAG" in
+            nudge-core@*)
+              echo "PACKAGE_DIR=packages/nudge-core" >> "$GITHUB_ENV"
+              echo "PACKAGE_NAME=@jakedowns/opencode-nudge-core" >> "$GITHUB_ENV"
+              echo "EXPECTED_VERSION=${RELEASE_TAG#nudge-core@}" >> "$GITHUB_ENV"
+              ;;
+            nudge-opencode@*)
+              echo "PACKAGE_DIR=packages/nudge-opencode" >> "$GITHUB_ENV"
+              echo "PACKAGE_NAME=@jakedowns/opencode-nudge" >> "$GITHUB_ENV"
+              echo "EXPECTED_VERSION=${RELEASE_TAG#nudge-opencode@}" >> "$GITHUB_ENV"
+              ;;
+            *)
+              echo "::error::Unknown release tag $RELEASE_TAG"
+              exit 1
+              ;;
+          esac
+
+      - name: Install workspace dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Verify tag matches package version
+        working-directory: ${{ env.PACKAGE_DIR }}
+        run: |
+          set -euo pipefail
+          actual="$(node -p "require('./package.json').version")"
+          if [ "$EXPECTED_VERSION" != "$actual" ]; then
+            echo "::error::Tag version $EXPECTED_VERSION does not match package version $actual"
+            exit 1
+          fi
+
+      - name: Test and build
+        run: |
+          set -euo pipefail
+          npm test
+          npm run build --workspace @jakedowns/opencode-nudge-core
+          npm run build --workspace @jakedowns/opencode-nudge
+
+      - name: Publish
+        working-directory: ${{ env.PACKAGE_DIR }}
+        run: npm publish --provenance --access public
