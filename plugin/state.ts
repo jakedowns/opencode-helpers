@@ -5,7 +5,7 @@
  * `.dev/` so it works even when a project has no reply config, and it is
  * git-ignored like the voice index.
  */
-import { readFileSync, renameSync, writeFileSync } from "node:fs"
+import { readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs"
 import path from "node:path"
 
 export type Scope = "session" | "project" | "global"
@@ -112,9 +112,26 @@ export function readState(root: string): VoiceState {
 
 export function writeState(root: string, state: VoiceState): VoiceState {
   const file = statePath(root)
-  const tmp = `${file}.part`
-  writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`)
-  renameSync(tmp, file)
+  // Unique temp name: two hosts sharing this folder must not rename each
+  // other's .part away (rename then fails ENOENT and takes the plugin down).
+  const tmp = `${file}.${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}.part`
+  const payload = `${JSON.stringify(state, null, 2)}\n`
+  try {
+    writeFileSync(tmp, payload)
+    renameSync(tmp, file)
+  } catch {
+    // Best effort: state is a convenience, not a source of truth.
+    try {
+      writeFileSync(file, payload)
+    } catch {
+      /* ignore */
+    }
+    try {
+      unlinkSync(tmp)
+    } catch {
+      /* ignore */
+    }
+  }
   return state
 }
 

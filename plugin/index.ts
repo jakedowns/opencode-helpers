@@ -346,11 +346,16 @@ function recordIndex(root: string, entry: IndexEntry): void {
     /* no index yet */
   }
   list.unshift(entry)
-  const tmp = `${file}.part`
+  const tmp = `${file}.${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}.part`
   try {
     writeFileSync(tmp, `${JSON.stringify(list.slice(0, 50), null, 2)}\n`)
     renameSync(tmp, file)
   } catch (error) {
+    try {
+      unlinkSync(tmp)
+    } catch {
+      /* ignore */
+    }
     log("index write failed", String(error))
   }
 }
