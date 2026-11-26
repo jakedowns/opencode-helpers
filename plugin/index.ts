@@ -219,6 +219,7 @@ async function purgeGenerated(
   root: string,
   cwd: string,
   days?: number,
+  options: { recordZero?: boolean } = {},
 ): Promise<{ removed: number; bytes: number; freed: string }> {
   const config = await readConfig(root, cwd)
   const retention = retentionFor(config)
@@ -232,7 +233,11 @@ async function purgeGenerated(
       /* index may not exist yet */
     }
   }
-  setLastPurge(root, result.removed, result.bytes)
+  // A scheduled sweep that finds nothing must not erase the result of the
+  // sweep that actually deleted the files (another host may have won the race).
+  if (result.removed > 0 || options.recordZero !== false) {
+    setLastPurge(root, result.removed, result.bytes)
+  }
   return { ...result, freed: formatBytes(result.bytes) }
 }
 
@@ -634,7 +639,7 @@ export default Plugin.define({
 
       const retention = retentionFor(await readConfig(root, location))
       const sweep = () => {
-        void purgeGenerated(root, location)
+        void purgeGenerated(root, location, undefined, { recordZero: false })
           .then((result) => {
             if (result.removed > 0) log(`retention removed ${result.removed} files (${result.freed})`)
           })
