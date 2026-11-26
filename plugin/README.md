@@ -39,22 +39,28 @@ Changing `opencode.jsonc` reloads the plugin. `opencode plugin list` should show
 
 ## What works
 
-- `voice_speak` (Code Mode `tools.voice.speak`): sanitises nothing — the agent's
-  text is spoken verbatim, preamble applied by `audioq.py`, synthesised to
-  `output.directory`, then enqueued so the returned path survives playback.
+- `voice_speak` (Code Mode `tools.voice.speak`): the agent's text is spoken
+  verbatim, preamble applied by `audioq.py`, synthesised to `output.directory`,
+  then enqueued so the returned path survives playback.
 - Auto-speak hook (`experimental.idle`): picks the last assistant message, skips
   reasoning parts, sanitises markdown, dedupes by message id, caps at
   `maxChars`, and speaks. When nothing is speakable it announces the session
   name and says the message was untranscribable instead of going silent.
+- `voice_control` (`tools.voice.control`): `mute`, `unmute`, `status` with
+  `session`, `project`, or `global` scope. Any active mute silences; state is
+  persisted in plugin storage, so it survives reloads.
+- Daemon: if the socket is missing, `setup` starts `piperd.py --serve --drain`
+  once, guarded by `<queue>/.voice-plugin.pid` created with `O_EXCL`, retrying
+  on a 1 s / 5 s / 30 s backoff. A stale pid file is replaced only after its
+  owner is confirmed dead.
 - Failures are logged and returned as tool content; nothing throws into a turn.
 
 ## What is not implemented yet
 
-- `/voice` commands and the three mute scopes.
+- `/voice` slash commands. The mutes work today through `voice_control`; the
+  commands land with the TUI part, which can show a toast instead of injecting
+  a synthetic message.
 - Sidebar list of recent audio (`sidebar.content` slot + `.voice-index.json`).
-- Daemon start/stop, the pid-file guard, and restart backoff (the tool uses the
-  one-shot piper path today; auto-speak uses `audioq.py say`, which prefers the
-  daemon when the socket answers).
 - Unit tests for the sanitiser and mute precedence.
 
 ## Verify by hand

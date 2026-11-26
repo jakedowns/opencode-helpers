@@ -19,6 +19,12 @@ Target: OpenCode V2 plugin API (`@opencode/plugin`, `Plugin.define`).
 | Audio links | **TUI sidebar panel** of recent audio, not a synthetic message |
 | Done bar | Offline unit + integration tests, plus one real manual session |
 
+As built in the stub: mutes are `voice_control` tool actions with the same three
+scopes, stored in plugin storage rather than `.dev/voice-state.json` (no file
+writes inside the project); slash commands wait for the TUI part so status can
+be a toast instead of a synthetic turn. The daemon guard and backoff are in
+place; the sidebar and unit tests are next.
+
 ## Problem
 
 Today the voice tooling is a pseudo-skill: `AGENTS.md` tells an agent to read

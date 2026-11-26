@@ -1,5 +1,6 @@
 // Load the local plugin for sessions in this repository.
-// Auto-speak stays off until the tool is proven; the voice_speak tool works now.
+// Auto-speak is ON for this project while the stub is being exercised.
+// Mute for one session: tools.voice.control {action:"mute", scope:"session"}.
 {
   "$schema": "https://opencode.ai/config.json",
   "plugins": [
@@ -7,7 +8,7 @@
       "package": "./plugin",
       "options": {
         "root": "/media/share/opencode-audio-tool",
-        "auto": false,
+        "auto": true,
         "maxChars": 2000,
         "emptyNotice": "{session} here: my last message was untranscribable, check the app"
       }

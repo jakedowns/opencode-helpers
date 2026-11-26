@@ -9,7 +9,7 @@
  * every failure is logged and returned as tool content.
  */
 import { spawn } from "node:child_process"
-import { existsSync, mkdirSync } from "node:fs"
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync, writeSync } from "node:fs"
 import path from "node:path"
 import { Plugin } from "@opencode/plugin"
 
@@ -246,6 +246,100 @@ async function speak(
   }
 }
 
+type MuteState = { session: boolean; project: boolean; global: boolean }
+
+function scopeKey(scope: string, location: string, sessionID?: string): string {
+  if (scope === "global") return "mute/global"
+  if (scope === "project") return `mute/project:${location}`
+  return `mute/session:${sessionID ?? "unknown"}`
+}
+
+async function readMutes(ctx: any, location: string, sessionID?: string): Promise<MuteState> {
+  const [global, project, session] = await Promise.all([
+    ctx.storage.get("mute/global").catch(() => false),
+    ctx.storage.get(`mute/project:${location}`).catch(() => false),
+    ctx.storage.get(`mute/session:${sessionID ?? "unknown"}`).catch(() => false),
+  ])
+  return { global: global === true, project: project === true, session: session === true }
+}
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function waitFor(predicate: () => boolean, ms: number): Promise<boolean> {
+  const deadline = Date.now() + ms
+  while (Date.now() < deadline) {
+    if (predicate()) return true
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
+  return predicate()
+}
+
+/**
+ * Start the resident daemon once. A pid file created with O_EXCL is the lock:
+ * two plugin instances cannot both spawn, and a stale file is replaced only
+ * after its owner is confirmed dead. Retries follow a 1 s / 5 s / 30 s backoff
+ * without blocking setup; one-shot synthesis covers the gap.
+ */
+function ensureDaemon(root: string, queueDir: string, sock: string): void {
+  void (async () => {
+    if (existsSync(sock)) return
+    mkdirSync(queueDir, { recursive: true })
+    const pidFile = path.join(queueDir, ".voice-plugin.pid")
+    try {
+      const existing = Number(readFileSync(pidFile, "utf8").trim())
+      if (existing && pidAlive(existing)) {
+        log(`daemon already live (pid ${existing})`)
+        return
+      }
+      unlinkSync(pidFile)
+    } catch {
+      /* no pid file */
+    }
+
+    for (const delay of [0, 5000, 30000]) {
+      if (existsSync(sock)) return
+      if (delay) await new Promise((resolve) => setTimeout(resolve, delay))
+      let fd: number
+      try {
+        fd = openSync(pidFile, "wx")
+      } catch {
+        return /* another instance owns it */
+      }
+      const child = spawn("python3", [path.join(root, "piperd.py"), "--serve", "--drain"], {
+        cwd: root,
+        detached: true,
+        stdio: "ignore",
+      })
+      child.on("error", () => {})
+      child.unref()
+      try {
+        writeSync(fd, String(child.pid))
+        closeSync(fd)
+      } catch {
+        /* best effort */
+      }
+      if (await waitFor(() => existsSync(sock), 10_000)) {
+        log(`daemon started (pid ${child.pid})`)
+        return
+      }
+      log(`daemon attempt failed (pid ${child.pid}); socket absent after 10s`)
+      try {
+        if (!pidAlive(child.pid)) unlinkSync(pidFile)
+      } catch {
+        /* ignore */
+      }
+    }
+    log("daemon unavailable after backoff; one-shot synthesis remains")
+  })().catch((error) => log("daemon start failed", String(error)))
+}
+
 export default Plugin.define({
   id: "assistant-voice",
   async setup(ctx) {
@@ -257,6 +351,8 @@ export default Plugin.define({
     const hasConfig = existsSync(path.join(location, ".dev", "audiomode.jsonc"))
     const auto = options.auto !== false && hasConfig
     const spoken = new Set<string>()
+    const queueDir = process.env.AUDIOQ_DIR || "/tmp/opencode/audio-replies/queue"
+    const sock = process.env.AUDIOQ_SOCK || "/tmp/opencode/audio-replies/piperd.sock"
 
     try {
       await ctx.tool.transform((editor) => {
@@ -284,6 +380,44 @@ export default Plugin.define({
             }
           },
         })
+
+        editor.add({
+          name: "control",
+          description:
+            "Mute, unmute, or report auto-speak. Scopes: session, project, global. Returns the effective state.",
+          input: {
+            type: "object",
+            properties: {
+              action: { type: "string", enum: ["mute", "unmute", "status"] },
+              scope: { type: "string", enum: ["session", "project", "global"] },
+            },
+            required: ["action"],
+            additionalProperties: false,
+          },
+          options: { namespace: "voice", codemode: true },
+          execute: async (input: unknown, context?: { sessionID?: string }) => {
+            try {
+              const args = (input ?? {}) as { action?: string; scope?: string }
+              const scope = args.scope ?? "session"
+              const key = scopeKey(scope, location, context?.sessionID)
+              if (args.action === "status") {
+                const mutes = await readMutes(ctx, location, context?.sessionID)
+                const effective = mutes.global || mutes.project || mutes.session
+                return { content: JSON.stringify({ ok: true, mutes, effective }) }
+              }
+              if (args.action !== "mute" && args.action !== "unmute") {
+                return { content: "voice: action must be mute, unmute, or status" }
+              }
+              await ctx.storage.set(key, args.action === "mute")
+              const mutes = await readMutes(ctx, location, context?.sessionID)
+              const effective = mutes.global || mutes.project || mutes.session
+              return { content: JSON.stringify({ ok: true, scope, mutes, effective }) }
+            } catch (error) {
+              log("voice_control failed", String(error))
+              return { content: `voice: ${String(error)}` }
+            }
+          },
+        })
       })
     } catch (error) {
       log("tool registration failed", String(error))
@@ -294,9 +428,16 @@ export default Plugin.define({
       return
     }
 
+    ensureDaemon(root, queueDir, sock)
+
     try {
       await ctx.session.hook("experimental.idle", async (event) => {
         try {
+          const mutes = await readMutes(ctx, location, event.sessionID)
+          if (mutes.global || mutes.project || mutes.session) {
+            log(`muted (${JSON.stringify(mutes)})`)
+            return
+          }
           const messages = await ctx.session.context({ sessionID: event.sessionID })
           const last = [...messages].reverse().find((message) => message.type === "assistant")
           if (!last || spoken.has(last.id)) return
