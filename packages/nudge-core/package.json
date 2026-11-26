@@ -1,6 +1,6 @@
 {
   "name": "@jakedowns/opencode-nudge-core",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "description": "Pure nudge policy for OpenCode plugins",
   "main": "./dist/index.js",
@@ -28,5 +28,15 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     }
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/jakedowns/opencode-helpers#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jakedowns/opencode-helpers.git",
+    "directory": "packages/nudge-core"
+  },
+  "bugs": {
+    "url": "https://github.com/jakedowns/opencode-helpers/issues"
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "@jakedowns/opencode-nudge",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "description": "OpenCode host adapter for shared nudge policy",
   "main": "./dist/index.js",
@@ -15,7 +15,7 @@
     "prepublishOnly": "npm test && npm run build"
   },
   "dependencies": {
-    "@jakedowns/opencode-nudge-core": "^0.1.1"
+    "@jakedowns/opencode-nudge-core": "^0.1.2"
   },
   "publishConfig": {
     "access": "public"
@@ -31,5 +31,15 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     }
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/jakedowns/opencode-helpers#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jakedowns/opencode-helpers.git",
+    "directory": "packages/nudge-opencode"
+  },
+  "bugs": {
+    "url": "https://github.com/jakedowns/opencode-helpers/issues"
   }
 }
