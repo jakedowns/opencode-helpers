@@ -7,7 +7,7 @@
  */
 import { Command, MenuItem, Panel, Plugin, usePlugin } from "@opencode/plugin/gui"
 import type { PanelTab } from "@opencode/plugin/gui"
-import { For, Show, createSignal } from "solid-js"
+import { For, Show, createSignal, onCleanup, onMount } from "solid-js"
 import { Voice } from "../rpc.ts"
 
 type Entry = { path: string; seconds?: number; at: number; session?: string }
@@ -71,7 +71,11 @@ function AudioPanel(props: { session: Session }) {
       .then((next: unknown) => setState(next as State))
       .catch(() => {})
 
-  void refresh()
+  onMount(() => {
+    void refresh()
+    const timer = setInterval(() => void refresh(), 2_000)
+    onCleanup(() => clearInterval(timer))
+  })
 
   const remove = (file: string) =>
     ctx.client
@@ -181,7 +185,7 @@ function AudioPanel(props: { session: Session }) {
       </Show>
       <Show when={state()?.audio}>
         <div style={{ opacity: 0.7 }}>
-          Output:{" "}
+          Volume:{" "}
           {state()?.audio?.available
             ? state()?.audio?.muted
               ? "muted"

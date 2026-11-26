@@ -740,7 +740,12 @@ async function voiceState(
     cache = state.cache ?? { at: 0, files: 0, bytes: 0 }
     audio = state.audio ?? { at: 0, available: false, muted: false, volume: 0 }
     queue = state.queue
-      ? { queued: state.queue.queued, playing: state.queue.playing, failed: state.queue.failed }
+      ? {
+          queued: state.queue.queued,
+          playing: state.queue.playing,
+          failed: state.queue.failed,
+          ...(state.queue.playingSession ? { playingSession: state.queue.playingSession } : {}),
+        }
       : { queued: 0, playing: 0, failed: 0 }
   } else {
     const config = await readConfig(root, directory)
@@ -967,7 +972,7 @@ export default Plugin.define({
         })().catch((error) => log("stats refresh failed", String(error)))
       }
       refreshStats()
-      const statsTimer = setInterval(refreshStats, 5_000)
+      const statsTimer = setInterval(refreshStats, 2_000)
       cleanups.push(() => clearInterval(statsTimer))
 
       const retention = retentionFor(hostConfig)

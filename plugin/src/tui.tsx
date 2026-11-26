@@ -167,7 +167,7 @@ export default Plugin.define({
             <text>{`queue ${queue.queued} · playing ${queue.playing}${queue.playingSession ? ` (${queue.playingSession})` : ""}`}</text>
           ) : null}
           {audio ? (
-            <text>{`output ${audio.available ? (audio.muted ? "MUTED" : `${Math.round(audio.volume * 100)}%`) : "host"}`}</text>
+            <text>{`volume ${audio.available ? (audio.muted ? "MUTED" : `${Math.round(audio.volume * 100)}%`) : "host"}`}</text>
           ) : null}
           <box flexDirection="column">
             <text>Recent</text>
@@ -307,7 +307,7 @@ export default Plugin.define({
                 <text>{`  queue ${queue.queued} · playing ${queue.playing}${queue.playingSession ? ` (${queue.playingSession})` : ""}`}</text>
               ) : null}
               {audio ? (
-                <text>{`  output ${audio.available ? (audio.muted ? "MUTED" : `${Math.round(audio.volume * 100)}%`) : "host"}`}</text>
+                <text>{`  volume ${audio.available ? (audio.muted ? "MUTED" : `${Math.round(audio.volume * 100)}%`) : "host"}`}</text>
               ) : null}
             </box>
           )

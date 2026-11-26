@@ -208,14 +208,14 @@ Both clients also show live state in the GUI Audio panel and TUI sidebar:
 Mode: host · Auto-speak: on          ← clickable: mute all / turn on
 Cache: 4.3 MB · 7 files
 Queue: 0 queued · 0 playing — Agent Voice Tool
-Output: 70%                           # "muted", or "host" on a client
+Volume: 70%                           # "muted", or "host" on a client
 ```
 
 `cache` comes from the reply files in `output.directory`, `queue` from the
 audioq queue directories, and `audio` from `wpctl get-volume` on the default
 sink. A host refreshes all three every 15 s; a client reads the host's published
 values from `.voice-state.json` instead of measuring its own zeroes, and shows
-`Output: host` when the audio device belongs to the other machine.
+`Volume: host` when the audio device belongs to the other machine.
 
 Mute buttons show their state — `✓ session muted` vs `○ session on`. The
 "Mode: host · Auto-speak: …" line is a button: when anything is muted it clears
