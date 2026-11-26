@@ -60,6 +60,49 @@ The GUI part contributes:
 A server-side `/voice` command is registered too, so the command exists even if
 the client-side parts are disabled.
 
+## Modes
+
+| Mode | Runs on | What it does |
+|---|---|---|
+| `host` (default) | the machine with piper | synthesises, enqueues, plays; also watches `.voice-requests/` |
+| `client` | a machine sharing the folder (e.g. the Mac) | never runs piper; writes a request file, reads the shared index for its panel |
+| `remote` | any machine without a shared folder | refuses; the tunnel design in `docs/remote-audio-pairing.md` is not built yet |
+
+Client and host talk through the shared directory only — no network, no RPC across
+machines:
+
+```
+<root>/.voice-requests/req-<id>.json   client -> host { text, sessionID }
+<root>/.voice-index.json               host -> clients (latest 50, newest first)
+<root>/.voice-state.json               mute state, shared by both
+```
+
+The host polls the request directory every 2 s (SMB/virtiofs events are not
+reliable), speaks each request through the normal queue, and records the result.
+On a VM whose audio device is passed through, the Mac client needs nothing else:
+the VM plays, the Mac sees the entry.
+
+Mac (client) config, using the Mac-side path to the shared folder:
+
+```jsonc
+{
+  "plugins": [
+    {
+      "package": "/Users/<you>/<shared>/opencode-audio-tool/plugin",
+      "options": {
+        "mode": "client",
+        "root": "/Users/<you>/<shared>/opencode-audio-tool",
+        "auto": true
+      }
+    }
+  ]
+}
+```
+
+Client mode needs no piper and no Python: it only reads and writes the shared
+files. macOS also ships no `aplay`, and does not need one — playback stays on
+the host.
+
 ## Options
 
 | Option | Default | Meaning |

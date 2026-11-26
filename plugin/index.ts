@@ -15,6 +15,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  readdirSync,
   renameSync,
   unlinkSync,
   writeFileSync,
@@ -25,7 +26,10 @@ import { Plugin } from "@opencode/plugin"
 import { readState, resolveMutes, setMute, setSidebar } from "./state.ts"
 import { Voice } from "./rpc.ts"
 
+type Mode = "host" | "client" | "remote"
+
 type Options = {
+  mode?: Mode
   root?: string
   auto?: boolean
   maxChars?: number
@@ -361,11 +365,89 @@ function voiceState(root: string, directory: string, sessionID?: string) {
   }
 }
 
+type RequestResult = { requested: true; id: string }
+
+/** Client mode: hand the text to the host through the shared folder. */
+function writeRequest(root: string, text: string, sessionID?: string): RequestResult {
+  const dir = path.join(root, ".voice-requests")
+  mkdirSync(dir, { recursive: true })
+  const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  const file = path.join(dir, `req-${id}.json`)
+  const tmp = `${file}.part`
+  writeFileSync(tmp, `${JSON.stringify({ id, text, sessionID, created_at: Date.now() })}\n`)
+  renameSync(tmp, file)
+  return { requested: true, id }
+}
+
+/**
+ * Host mode: watch the shared request directory and synthesise whatever a
+ * client drops there. Polling, not fs.watch — SMB/virtiofs events are not
+ * reliable, and two seconds is invisible next to synthesis.
+ */
+function startRequestWatcher(root: string, location: string): () => void {
+  const dir = path.join(root, ".voice-requests")
+  mkdirSync(dir, { recursive: true })
+  const seen = new Set<string>()
+  const timer = setInterval(() => {
+    void (async () => {
+      let names: string[] = []
+      try {
+        names = readdirSync(dir).filter((name) => name.endsWith(".json")).sort()
+      } catch {
+        return
+      }
+      for (const name of names) {
+        if (seen.has(name)) continue
+        seen.add(name)
+        const file = path.join(dir, name)
+        try {
+          const request = JSON.parse(readFileSync(file, "utf8")) as {
+            text?: string
+            sessionID?: string
+          }
+          const text = String(request.text ?? "").trim()
+          if (!text) {
+            unlinkSync(file)
+            continue
+          }
+          const result = await speakDurable(root, location, text, { sessionID: request.sessionID })
+          recordIndex(root, {
+            path: String(result.path),
+            seconds: result.seconds,
+            at: Date.now(),
+            via: "request",
+          })
+          try {
+            unlinkSync(file)
+          } catch {
+            // SMB can hold a handle open; a renamed file is still out of the queue.
+            try {
+              renameSync(file, `${file}.done`)
+            } catch {
+              /* it will be retried on the next scan only if unreadable */
+            }
+          }
+          log(`request ${name} spoken`)
+        } catch (error) {
+          log(`request ${name} failed`, String(error))
+          try {
+            renameSync(file, `${file}.failed`)
+          } catch {
+            /* leave it */
+          }
+        }
+      }
+    })()
+  }, 2000)
+  return () => clearInterval(timer)
+}
+
 export default Plugin.define({
   id: "assistant-voice",
   async setup(ctx) {
     const options = (ctx.options ?? {}) as Options
     const root = options.root ?? DEFAULT_ROOT
+    const mode: Mode = options.mode ?? "host"
     const maxChars = typeof options.maxChars === "number" ? options.maxChars : DEFAULT_MAX_CHARS
     const noticeTemplate = options.emptyNotice ?? DEFAULT_NOTICE
     const location = ctx.location?.directory ?? process.cwd()
@@ -374,6 +456,11 @@ export default Plugin.define({
     const spoken = new Set<string>()
     const queueDir = process.env.AUDIOQ_DIR || "/tmp/opencode/audio-replies/queue"
     const sock = process.env.AUDIOQ_SOCK || "/tmp/opencode/audio-replies/piperd.sock"
+    const cleanups: Array<() => void> = []
+    if (mode === "host") {
+      cleanups.push(startRequestWatcher(root, location))
+      log("host mode: watching .voice-requests")
+    }
 
     try {
       await ctx.command.transform((editor) => {
@@ -446,6 +533,16 @@ export default Plugin.define({
           execute: async (input: unknown, context?: { sessionID?: string }) => {
             const text = String((input as { text?: unknown })?.text ?? "").trim()
             if (!text) return { content: "voice: empty text; nothing to speak." }
+            if (mode === "remote") {
+              return {
+                content:
+                  "voice: remote mode is specified but not implemented; see docs/remote-audio-pairing.md.",
+              }
+            }
+            if (mode === "client") {
+              const request = writeRequest(root, text, context?.sessionID)
+              return { content: JSON.stringify({ ok: true, ...request }) }
+            }
             try {
               const result = await speakDurable(root, location, text, { sessionID: context?.sessionID })
               recordIndex(root, {
@@ -503,7 +600,7 @@ export default Plugin.define({
 
     if (!auto) {
       log(`auto-speak off (config ${hasConfig ? "found" : "missing"}, option auto=${String(options.auto)})`)
-      return
+      return () => cleanups.forEach((cleanup) => cleanup())
     }
 
     ensureDaemon(root, queueDir, sock)
@@ -529,6 +626,17 @@ export default Plugin.define({
             return
           }
           spoken.add(last.id)
+          if (mode === "remote") {
+            log("remote mode: not implemented, skipping auto-speak")
+            return
+          }
+          if (mode === "client") {
+            const title = cleaned ? "" : ((await sessionTitle(root, event.sessionID)) ?? "this session")
+            const payload = cleaned || noticeTemplate.replaceAll("{session}", title)
+            const request = writeRequest(root, payload, event.sessionID)
+            log(`requested ${request.id}${cleaned ? "" : " (untranscribable notice)"}`)
+            return
+          }
           if (!cleaned) {
             const title = (await sessionTitle(root, event.sessionID)) ?? "this session"
             const notice = noticeTemplate.replaceAll("{session}", title)
@@ -547,5 +655,7 @@ export default Plugin.define({
     } catch (error) {
       log("auto-speak hook failed", String(error))
     }
+
+    return () => cleanups.forEach((cleanup) => cleanup())
   },
 })

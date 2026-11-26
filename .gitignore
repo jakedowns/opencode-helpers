@@ -51,3 +51,6 @@ audio-replies/
 
 # Plugin build deps
 plugin/node_modules/
+
+# Cross-host speech requests (shared folder bus)
+.voice-requests/
