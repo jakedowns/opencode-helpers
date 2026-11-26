@@ -150,16 +150,23 @@ function AudioPanel(props: { session: Session }) {
   return (
     <div
       style={{
-        display: "flex",
-        "flex-direction": "column",
-        gap: "8px",
-        padding: "12px",
-        "font-size": "12px",
         height: "100%",
+        "overflow-y": "auto",
+        "overflow-x": "hidden",
         "box-sizing": "border-box",
-        "min-height": "0",
       }}
     >
+      <div
+        style={{
+          display: "flex",
+          "flex-direction": "column",
+          gap: "8px",
+          padding: "12px",
+          "font-size": "12px",
+          "min-height": "100%",
+          "box-sizing": "border-box",
+        }}
+      >
       <style>{`
         .voice-btn {
           padding: 4px 10px;
@@ -289,10 +296,6 @@ function AudioPanel(props: { session: Session }) {
             display: "flex",
             "flex-direction": "column",
             gap: "4px",
-            "overflow-y": "auto",
-            "overflow-x": "hidden",
-            flex: "1 1 auto",
-            "min-height": "0",
             "padding-right": "4px",
           }}
         >
@@ -327,6 +330,7 @@ function AudioPanel(props: { session: Session }) {
           </For>
         </div>
       </Show>
+      </div>
     </div>
   )
 }
