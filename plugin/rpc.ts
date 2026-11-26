@@ -111,6 +111,18 @@ export const Voice = Rpc.define({
       },
       output: state,
     },
+    remove: {
+      input: {
+        type: "object",
+        properties: {
+          ...location,
+          path: { type: "string" },
+        },
+        required: ["directory", "path"],
+        additionalProperties: false,
+      },
+      output: state,
+    },
     purge: {
       input: {
         type: "object",

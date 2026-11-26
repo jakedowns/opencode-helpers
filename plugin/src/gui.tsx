@@ -71,6 +71,13 @@ function AudioPanel(props: { session: Session }) {
 
   void refresh()
 
+  const remove = (file: string) =>
+    ctx.client
+      .rpc(Voice)
+      .remove({ directory: props.session.directory, sessionID: props.session.id, path: file })
+      .then((next: unknown) => setState(next as State))
+      .catch(() => {})
+
   const purge = () =>
     ctx.client
       .rpc(Voice)
@@ -93,6 +100,18 @@ function AudioPanel(props: { session: Session }) {
       .catch(() => {})
   }
 
+  const muteLabel = (scope: "session" | "project" | "global", value?: boolean) =>
+    `${value ? "✓" : "○"} ${scope} ${value ? "muted" : "on"}`
+
+  const activeMute = () => {
+    const m = state()?.mutes
+    if (!m) return ""
+    if (m.session) return "session"
+    if (m.project) return "project"
+    if (m.global) return "global"
+    return ""
+  }
+
   return (
     <div style={{ display: "flex", "flex-direction": "column", gap: "8px", padding: "12px", "font-size": "12px" }}>
       <div style={{ display: "flex", "justify-content": "space-between", "align-items": "center" }}>
@@ -101,9 +120,9 @@ function AudioPanel(props: { session: Session }) {
           Refresh
         </button>
       </div>
-      <div style={{ opacity: 0.7 }}>
-        session {state()?.mutes.session ? "muted" : "on"} · project {state()?.mutes.project ? "muted" : "on"} · global{" "}
-        {state()?.mutes.global ? "muted" : "on"}
+      <div style={{ opacity: 0.8 }}>
+        Auto-speak:{" "}
+        {activeMute() ? <strong>muted ({activeMute()})</strong> : <strong>on</strong>}
       </div>
       <Show when={state()?.cache}>
         <div style={{ opacity: 0.7 }}>
@@ -118,18 +137,38 @@ function AudioPanel(props: { session: Session }) {
       </Show>
       <Show when={state()?.audio}>
         <div style={{ opacity: 0.7 }}>
-          Output: {state()?.audio?.muted ? "muted" : `${Math.round((state()?.audio?.volume ?? 0) * 100)}%`}
+          Output:{" "}
+          {state()?.audio?.available
+            ? state()?.audio?.muted
+              ? "muted"
+              : `${Math.round((state()?.audio?.volume ?? 0) * 100)}%`
+            : "host"}
         </div>
       </Show>
       <div style={{ display: "flex", gap: "6px", "flex-wrap": "wrap" }}>
-        <button type="button" onClick={() => toggle("session")}>
-          Mute session
+        <button
+          type="button"
+          aria-pressed={state()?.mutes.session === true}
+          onClick={() => toggle("session")}
+          style={{ "font-weight": state()?.mutes.session ? "bold" : "normal" }}
+        >
+          {muteLabel("session", state()?.mutes.session)}
         </button>
-        <button type="button" onClick={() => toggle("project")}>
-          Mute project
+        <button
+          type="button"
+          aria-pressed={state()?.mutes.project === true}
+          onClick={() => toggle("project")}
+          style={{ "font-weight": state()?.mutes.project ? "bold" : "normal" }}
+        >
+          {muteLabel("project", state()?.mutes.project)}
         </button>
-        <button type="button" onClick={() => toggle("global")}>
-          Mute all
+        <button
+          type="button"
+          aria-pressed={state()?.mutes.global === true}
+          onClick={() => toggle("global")}
+          style={{ "font-weight": state()?.mutes.global ? "bold" : "normal" }}
+        >
+          {muteLabel("global", state()?.mutes.global)}
         </button>
         <button type="button" onClick={() => void purge()}>
           Purge audio
@@ -145,14 +184,30 @@ function AudioPanel(props: { session: Session }) {
         <div style={{ display: "flex", "flex-direction": "column", gap: "4px" }}>
           <For each={state()?.entries ?? []}>
             {(entry: Entry) => (
-              <div style={{ display: "flex", "justify-content": "space-between", gap: "8px" }}>
-                <span style={{ overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap" }}>
+              <div style={{ display: "flex", "align-items": "center", gap: "8px" }}>
+                <span
+                  style={{
+                    overflow: "hidden",
+                    "text-overflow": "ellipsis",
+                    "white-space": "nowrap",
+                    flex: 1,
+                  }}
+                >
                   {entryLabel(entry)}
                 </span>
                 <span style={{ opacity: 0.6 }}>
                   {entry.seconds ? `${entry.seconds}s · ` : ""}
                   {age(entry.at)}
                 </span>
+                <button
+                  type="button"
+                  title="Delete this file from disk"
+                  aria-label={`Delete ${entryLabel(entry)}`}
+                  onClick={() => void remove(entry.path)}
+                  style={{ padding: "0 6px", "line-height": "1.4" }}
+                >
+                  ✕
+                </button>
               </div>
             )}
           </For>

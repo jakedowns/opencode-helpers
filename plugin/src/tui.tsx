@@ -151,7 +151,9 @@ export default Plugin.define({
           <text>{statusLine()}</text>
           {cache ? <text>{`cache ${formatBytes(cache.bytes)} · ${cache.files} file${cache.files === 1 ? "" : "s"}`}</text> : null}
           {queue ? <text>{`queue ${queue.queued} · playing ${queue.playing}`}</text> : null}
-          {audio ? <text>{`output ${audio.muted ? "MUTED" : `${Math.round(audio.volume * 100)}%`}`}</text> : null}
+          {audio ? (
+            <text>{`output ${audio.available ? (audio.muted ? "MUTED" : `${Math.round(audio.volume * 100)}%`) : "host"}`}</text>
+          ) : null}
           <box flexDirection="column">
             <text>Recent</text>
             {entries.length === 0 ? (
@@ -273,7 +275,9 @@ export default Plugin.define({
                 <text>{`  cache ${formatBytes(cache.bytes)} · ${cache.files} file${cache.files === 1 ? "" : "s"}`}</text>
               ) : null}
               {queue ? <text>{`  queue ${queue.queued} · playing ${queue.playing}`}</text> : null}
-              {audio ? <text>{`  output ${audio.muted ? "MUTED" : `${Math.round(audio.volume * 100)}%`}`}</text> : null}
+              {audio ? (
+                <text>{`  output ${audio.available ? (audio.muted ? "MUTED" : `${Math.round(audio.volume * 100)}%`) : "host"}`}</text>
+              ) : null}
             </box>
           )
         },

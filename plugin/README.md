@@ -64,8 +64,9 @@ the client-side parts are disabled.
 
 | Mode | Runs on | What it does |
 |---|---|---|
-| `host` (default) | the machine with piper | synthesises, enqueues, plays; also watches `.voice-requests/` |
-| `client` | a machine sharing the folder (e.g. the Mac) | never runs piper; writes a request file, reads the shared index for its panel |
+| `auto` (default) | anywhere | Linux with an executable `piper/piper` → `host`; everything else → `client` |
+| `host` | the machine with piper | synthesises, enqueues, plays; watches `.voice-requests/`; publishes stats every 15 s |
+| `client` | a machine sharing the folder (e.g. the Mac) | never runs piper; writes request files and reads the host's stats from the shared state |
 | `remote` | any machine without a shared folder | refuses; the tunnel design in `docs/remote-audio-pairing.md` is not built yet |
 
 Client and host talk through the shared directory only — no network, no RPC across
@@ -202,8 +203,15 @@ Output: 70%            # or "muted"
 
 `cache` comes from the reply files in `output.directory`, `queue` from the
 audioq queue directories, and `audio` from `wpctl get-volume` on the default
-sink. The GUI reads them over RPC; the TUI reads `.voice-state.json`, which the
-host refreshes after every speak, purge and sweep.
+sink. A host refreshes all three every 15 s; a client reads the host's published
+values from `.voice-state.json` instead of measuring its own zeroes, and shows
+`Output: host` when the audio device belongs to the other machine.
+
+Mute buttons show their state — `✓ session muted` vs `○ session on`, with the
+effective mode on the line above ("Auto-speak: muted (project)"). Each row in the
+GUI panel has an **✕** that deletes that reply from disk and from the index;
+only paths present in the index can be removed, and both `.wav`/`.mp3` variants
+of that basename go.
 
 ## What is not implemented yet
 

@@ -10,6 +10,7 @@
  */
 import { spawn } from "node:child_process"
 import {
+  accessSync,
   closeSync,
   existsSync,
   mkdirSync,
@@ -21,13 +22,15 @@ import {
   unlinkSync,
   writeFileSync,
   writeSync,
+  constants as fsConstants,
 } from "node:fs"
 import path from "node:path"
 import { Plugin } from "@opencode/plugin"
 import { readState, resolveMutes, setAudio, setCache, setLastPurge, setMute, setQueue, setSidebar } from "./state.ts"
 import { Voice } from "./rpc.ts"
 
-type Mode = "host" | "client" | "remote"
+type Mode = "auto" | "host" | "client" | "remote"
+type ResolvedMode = Exclude<Mode, "auto">
 
 type Options = {
   mode?: Mode
@@ -41,6 +44,23 @@ type Options = {
 const DEFAULT_ROOT = "/media/share/opencode-audio-tool"
 const DEFAULT_NOTICE = "{session} here: my last message was untranscribable, check the app"
 const DEFAULT_MAX_CHARS = 2000
+
+/**
+ * `auto` decides from the machine: only a Linux box with an executable piper
+ * binary is a host. macOS (and any box without piper) is a client that reads
+ * the shared host stats.
+ */
+function resolveMode(requested: Mode, root: string): ResolvedMode {
+  if (requested !== "auto") return requested
+  if (process.platform !== "linux") return "client"
+  const piper = path.join(root, "piper", "piper")
+  try {
+    accessSync(piper, fsConstants.X_OK)
+    return "host"
+  } catch {
+    return "client"
+  }
+}
 
 function log(message: string, detail?: unknown) {
   console.log(`[assistant-voice] ${message}`, detail === undefined ? "" : detail)
@@ -308,6 +328,29 @@ function recordIndex(root: string, entry: IndexEntry): void {
  * that file. `say` alone would move the item into played/ and leave the caller
  * with a path that stops resolving.
  */
+/** Delete one indexed reply from disk and from the index. Only paths the index
+ * knows about can be removed, and both format variants of the basename go. */
+function removeEntry(root: string, target: string): boolean {
+  const file = path.resolve(target)
+  const entries = readIndex(root, 500)
+  if (!entries.some((entry) => path.resolve(entry.path) === file)) return false
+  const base = file.replace(/\.(wav|mp3)$/i, "")
+  for (const candidate of new Set([`${base}.wav`, `${base}.mp3`, file])) {
+    try {
+      unlinkSync(candidate)
+    } catch {
+      /* already gone */
+    }
+  }
+  const next = entries.filter((entry) => path.resolve(entry.path) !== file).slice(0, 50)
+  try {
+    writeFileSync(path.join(root, ".voice-index.json"), `${JSON.stringify(next, null, 2)}\n`)
+  } catch {
+    /* index write failed; files are gone */
+  }
+  return true
+}
+
 async function speakDurable(
   root: string,
   cwd: string,
@@ -550,13 +593,31 @@ function cacheUsage(dir: string): { files: number; bytes: number } {
   return { files, bytes }
 }
 
-async function voiceState(root: string, directory: string, sessionID?: string) {
+async function voiceState(
+  root: string,
+  directory: string,
+  sessionID?: string,
+  mode: ResolvedMode = "host",
+) {
   const state = readState(root)
-  const config = await readConfig(root, directory)
-  const outputDir = config.output?.directory || DEFAULT_OUTPUT_DIR
-  const cache = { at: Date.now(), ...cacheUsage(outputDir) }
-  const audio = await audioStatus()
-  const queue = queueCounts()
+  let cache: { at: number; files: number; bytes: number }
+  let audio: AudioStatus
+  let queue: { queued: number; playing: number; failed: number }
+  if (mode === "client") {
+    // The client shares the folder but not the queue or the sound device: read
+    // the host's published stats instead of measuring local zeroes.
+    cache = state.cache ?? { at: 0, files: 0, bytes: 0 }
+    audio = state.audio ?? { at: 0, available: false, muted: false, volume: 0 }
+    queue = state.queue
+      ? { queued: state.queue.queued, playing: state.queue.playing, failed: state.queue.failed }
+      : { queued: 0, playing: 0, failed: 0 }
+  } else {
+    const config = await readConfig(root, directory)
+    const outputDir = config.output?.directory || DEFAULT_OUTPUT_DIR
+    cache = { at: Date.now(), ...cacheUsage(outputDir) }
+    audio = await audioStatus()
+    queue = queueCounts()
+  }
   // Optional fields must be absent, not null: RPC validates the encoded JSON,
   // and `undefined` becomes `null`, which fails the declared type.
   const entries = readIndex(root).map((entry) => {
@@ -698,7 +759,8 @@ export default Plugin.define({
   async setup(ctx) {
     const options = (ctx.options ?? {}) as Options
     const root = options.root ?? DEFAULT_ROOT
-    const mode: Mode = options.mode ?? "host"
+    const requestedMode: Mode = options.mode ?? "auto"
+    const mode: ResolvedMode = resolveMode(requestedMode, root)
     const maxChars = typeof options.maxChars === "number" ? options.maxChars : DEFAULT_MAX_CHARS
     const noticeTemplate = options.emptyNotice ?? DEFAULT_NOTICE
     const location = ctx.location?.directory ?? process.cwd()
@@ -709,6 +771,8 @@ export default Plugin.define({
     const spoken = new Set<string>()
     const queueDir = process.env.AUDIOQ_DIR || "/tmp/opencode/audio-replies/queue"
     const sock = process.env.AUDIOQ_SOCK || "/tmp/opencode/audio-replies/piperd.sock"
+    log(`mode ${mode} (requested ${requestedMode}, platform ${process.platform})`)
+
     const cleanups: Array<() => void> = []
     if (mode === "host") {
       cleanups.push(startRequestWatcher(root, location))
@@ -730,7 +794,21 @@ export default Plugin.define({
         }
       }
 
-      const retention = retentionFor(await readConfig(root, location))
+      const hostConfig = await readConfig(root, location)
+      const outputDir = hostConfig.output?.directory || DEFAULT_OUTPUT_DIR
+      const refreshStats = () => {
+        void (async () => {
+          const usage = cacheUsage(outputDir)
+          setCache(root, usage.files, usage.bytes)
+          setQueue(root, queueCounts())
+          setAudio(root, await audioStatus())
+        })().catch((error) => log("stats refresh failed", String(error)))
+      }
+      refreshStats()
+      const statsTimer = setInterval(refreshStats, 15_000)
+      cleanups.push(() => clearInterval(statsTimer))
+
+      const retention = retentionFor(hostConfig)
       const sweep = () => {
         void purgeGenerated(root, location, undefined, { recordZero: false })
           .then((result) => {
@@ -782,7 +860,7 @@ export default Plugin.define({
       await ctx.rpc.register(Voice, {
         state: async (input: unknown) => {
           const args = (input ?? {}) as { directory?: string; sessionID?: string }
-          return await voiceState(root, args.directory ?? location, args.sessionID)
+          return await voiceState(root, args.directory ?? location, args.sessionID, mode)
         },
         setMute: async (input: unknown) => {
           const args = (input ?? {}) as {
@@ -793,17 +871,22 @@ export default Plugin.define({
           }
           const scope = (args.scope ?? "session") as "session" | "project" | "global"
           setMute(root, scope, args.directory ?? location, args.sessionID, args.value === true)
-          return await voiceState(root, args.directory ?? location, args.sessionID)
+          return await voiceState(root, args.directory ?? location, args.sessionID, mode)
+        },
+        remove: async (input: unknown) => {
+          const args = (input ?? {}) as { directory?: string; sessionID?: string; path?: string }
+          if (args.path) removeEntry(root, args.path)
+          return await voiceState(root, args.directory ?? location, args.sessionID, mode)
         },
         purge: async (input: unknown) => {
           const args = (input ?? {}) as { directory?: string; sessionID?: string; days?: number }
           await purgeGenerated(root, args.directory ?? location, args.days)
-          return await voiceState(root, args.directory ?? location, args.sessionID)
+          return await voiceState(root, args.directory ?? location, args.sessionID, mode)
         },
         setSidebar: async (input: unknown) => {
           const args = (input ?? {}) as { visible?: boolean }
           setSidebar(root, args.visible === true)
-          return await voiceState(root, location)
+          return await voiceState(root, location, undefined, mode)
         },
       })
     } catch (error) {
