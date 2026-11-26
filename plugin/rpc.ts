@@ -35,6 +35,16 @@ const state = {
     entries: { type: "array", items: entry },
     mutes,
     sidebar: { type: "boolean" },
+    cache: {
+      type: "object",
+      properties: {
+        at: { type: "number" },
+        files: { type: "number" },
+        bytes: { type: "number" },
+      },
+      required: ["at", "files", "bytes"],
+      additionalProperties: false,
+    },
     lastPurge: {
       type: "object",
       properties: {

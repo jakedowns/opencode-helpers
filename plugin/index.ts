@@ -24,7 +24,7 @@ import {
 } from "node:fs"
 import path from "node:path"
 import { Plugin } from "@opencode/plugin"
-import { readState, resolveMutes, setLastPurge, setMute, setSidebar } from "./state.ts"
+import { readState, resolveMutes, setCache, setLastPurge, setMute, setSidebar } from "./state.ts"
 import { Voice } from "./rpc.ts"
 
 type Mode = "host" | "client" | "remote"
@@ -238,6 +238,10 @@ async function purgeGenerated(
   if (result.removed > 0 || options.recordZero !== false) {
     setLastPurge(root, result.removed, result.bytes)
   }
+  {
+    const usage = cacheUsage(dir)
+    setCache(root, usage.files, usage.bytes)
+  }
   return { ...result, freed: formatBytes(result.bytes) }
 }
 
@@ -379,6 +383,10 @@ async function speakDurable(
       log("mp3 transcode failed; keeping wav", convert.stderr.slice(0, 200))
     }
   }
+  {
+    const usage = cacheUsage(outputDir)
+    setCache(root, usage.files, usage.bytes)
+  }
   return {
     title: resolvedTitle,
     path: linkFile,
@@ -484,8 +492,32 @@ function readIndex(root: string, limit = 20): IndexEntry[] {
   }
 }
 
-function voiceState(root: string, directory: string, sessionID?: string) {
+function cacheUsage(dir: string): { files: number; bytes: number } {
+  let files = 0
+  let bytes = 0
+  try {
+    for (const name of readdirSync(dir)) {
+      if (!name.startsWith("reply-")) continue
+      if (!name.endsWith(".wav") && !name.endsWith(".mp3")) continue
+      try {
+        const stat = statSync(path.join(dir, name))
+        files += 1
+        bytes += stat.size
+      } catch {
+        /* raced with a purge */
+      }
+    }
+  } catch {
+    /* directory not created yet */
+  }
+  return { files, bytes }
+}
+
+async function voiceState(root: string, directory: string, sessionID?: string) {
   const state = readState(root)
+  const config = await readConfig(root, directory)
+  const outputDir = config.output?.directory || DEFAULT_OUTPUT_DIR
+  const cache = { at: Date.now(), ...cacheUsage(outputDir) }
   // Optional fields must be absent, not null: RPC validates the encoded JSON,
   // and `undefined` becomes `null`, which fails the declared type.
   const entries = readIndex(root).map((entry) => {
@@ -501,11 +533,13 @@ function voiceState(root: string, directory: string, sessionID?: string) {
     entries: typeof entries
     mutes: ReturnType<typeof resolveMutes>
     sidebar: boolean
+    cache: { files: number; bytes: number }
     lastPurge?: { at: number; removed: number; bytes: number }
   } = {
     entries,
     mutes: resolveMutes(state, directory, sessionID),
     sidebar: state.sidebar,
+    cache,
   }
   if (state.lastPurge) result.lastPurge = state.lastPurge
   return result
@@ -689,7 +723,7 @@ export default Plugin.define({
       await ctx.rpc.register(Voice, {
         state: async (input: unknown) => {
           const args = (input ?? {}) as { directory?: string; sessionID?: string }
-          return voiceState(root, args.directory ?? location, args.sessionID)
+          return await voiceState(root, args.directory ?? location, args.sessionID)
         },
         setMute: async (input: unknown) => {
           const args = (input ?? {}) as {
@@ -700,17 +734,17 @@ export default Plugin.define({
           }
           const scope = (args.scope ?? "session") as "session" | "project" | "global"
           setMute(root, scope, args.directory ?? location, args.sessionID, args.value === true)
-          return voiceState(root, args.directory ?? location, args.sessionID)
+          return await voiceState(root, args.directory ?? location, args.sessionID)
         },
         purge: async (input: unknown) => {
           const args = (input ?? {}) as { directory?: string; sessionID?: string; days?: number }
           await purgeGenerated(root, args.directory ?? location, args.days)
-          return voiceState(root, args.directory ?? location, args.sessionID)
+          return await voiceState(root, args.directory ?? location, args.sessionID)
         },
         setSidebar: async (input: unknown) => {
           const args = (input ?? {}) as { visible?: boolean }
           setSidebar(root, args.visible === true)
-          return voiceState(root, location)
+          return await voiceState(root, location)
         },
       })
     } catch (error) {

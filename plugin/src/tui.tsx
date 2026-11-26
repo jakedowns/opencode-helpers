@@ -141,10 +141,12 @@ export default Plugin.define({
 
     const AudioToolPage = () => {
       const entries = readIndex(root, 12)
+      const cache = readState(root).cache
       return (
         <box flexDirection="column" padding={1} gap={1}>
           <text>Audio tool</text>
           <text>{statusLine()}</text>
+          {cache ? <text>{`cache ${formatBytes(cache.bytes)} · ${cache.files} file${cache.files === 1 ? "" : "s"}`}</text> : null}
           <box flexDirection="column">
             <text>Recent</text>
             {entries.length === 0 ? (
@@ -250,6 +252,7 @@ export default Plugin.define({
         render: () => {
           if (!sidebarVisible()) return null
           const entries = readIndex(root)
+          const cache = readState(root).cache
           return (
             <box flexDirection="column">
               <box onMouseDown={openAudioTool}>
@@ -258,6 +261,9 @@ export default Plugin.define({
               {entries.map((entry) => (
                 <text>{`  ${entryLabel(entry)}  ${entry.seconds ? `${entry.seconds}s` : ""}  ${age(entry.at)}`}</text>
               ))}
+              {cache ? (
+                <text>{`  cache ${formatBytes(cache.bytes)} · ${cache.files} file${cache.files === 1 ? "" : "s"}`}</text>
+              ) : null}
             </box>
           )
         },

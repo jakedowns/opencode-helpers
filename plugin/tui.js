@@ -19,6 +19,11 @@ function readState(root) {
       projects: parsed?.projects && typeof parsed.projects === "object" ? parsed.projects : {},
       sessions: parsed?.sessions && typeof parsed.sessions === "object" ? parsed.sessions : {},
       sidebar: parsed?.sidebar !== false,
+      cache: parsed?.cache && typeof parsed.cache.at === "number" ? {
+        at: parsed.cache.at,
+        files: Number(parsed.cache.files) || 0,
+        bytes: Number(parsed.cache.bytes) || 0
+      } : void 0,
       lastPurge: parsed?.lastPurge && typeof parsed.lastPurge.at === "number" ? {
         at: parsed.lastPurge.at,
         removed: Number(parsed.lastPurge.removed) || 0,
@@ -68,6 +73,12 @@ function readIndex(root, limit = 4) {
   } catch {
     return [];
   }
+}
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 function entryLabel(entry) {
   const name = path2.basename(entry.path);
@@ -155,7 +166,8 @@ var tui_default = Plugin.define({
     };
     const AudioToolPage = () => {
       const entries = readIndex(root, 12);
-      return /* @__PURE__ */ React.createElement("box", { flexDirection: "column", padding: 1, gap: 1 }, /* @__PURE__ */ React.createElement("text", null, "Audio tool"), /* @__PURE__ */ React.createElement("text", null, statusLine()), /* @__PURE__ */ React.createElement("box", { flexDirection: "column" }, /* @__PURE__ */ React.createElement("text", null, "Recent"), entries.length === 0 ? /* @__PURE__ */ React.createElement("text", null, "  nothing yet") : entries.map((entry) => /* @__PURE__ */ React.createElement("text", null, `  ${entryLabel(entry)}  ${entry.seconds ? `${entry.seconds}s` : ""}  ${age(entry.at)}`))), /* @__PURE__ */ React.createElement("box", { flexDirection: "column" }, /* @__PURE__ */ React.createElement("text", null, "Mute"), /* @__PURE__ */ React.createElement("box", { onMouseDown: () => toggle("session") }, /* @__PURE__ */ React.createElement("text", null, `  [${mutes().session ? "x" : " "}] this session`)), /* @__PURE__ */ React.createElement("box", { onMouseDown: () => toggle("project") }, /* @__PURE__ */ React.createElement("text", null, `  [${mutes().project ? "x" : " "}] this project`)), /* @__PURE__ */ React.createElement("box", { onMouseDown: () => toggle("global") }, /* @__PURE__ */ React.createElement("text", null, `  [${mutes().global ? "x" : " "}] everywhere`))), /* @__PURE__ */ React.createElement("text", null, "esc to go back \xB7 palette: Voice"));
+      const cache = readState(root).cache;
+      return /* @__PURE__ */ React.createElement("box", { flexDirection: "column", padding: 1, gap: 1 }, /* @__PURE__ */ React.createElement("text", null, "Audio tool"), /* @__PURE__ */ React.createElement("text", null, statusLine()), cache ? /* @__PURE__ */ React.createElement("text", null, `cache ${formatBytes(cache.bytes)} \xB7 ${cache.files} file${cache.files === 1 ? "" : "s"}`) : null, /* @__PURE__ */ React.createElement("box", { flexDirection: "column" }, /* @__PURE__ */ React.createElement("text", null, "Recent"), entries.length === 0 ? /* @__PURE__ */ React.createElement("text", null, "  nothing yet") : entries.map((entry) => /* @__PURE__ */ React.createElement("text", null, `  ${entryLabel(entry)}  ${entry.seconds ? `${entry.seconds}s` : ""}  ${age(entry.at)}`))), /* @__PURE__ */ React.createElement("box", { flexDirection: "column" }, /* @__PURE__ */ React.createElement("text", null, "Mute"), /* @__PURE__ */ React.createElement("box", { onMouseDown: () => toggle("session") }, /* @__PURE__ */ React.createElement("text", null, `  [${mutes().session ? "x" : " "}] this session`)), /* @__PURE__ */ React.createElement("box", { onMouseDown: () => toggle("project") }, /* @__PURE__ */ React.createElement("text", null, `  [${mutes().project ? "x" : " "}] this project`)), /* @__PURE__ */ React.createElement("box", { onMouseDown: () => toggle("global") }, /* @__PURE__ */ React.createElement("text", null, `  [${mutes().global ? "x" : " "}] everywhere`))), /* @__PURE__ */ React.createElement("text", null, "esc to go back \xB7 palette: Voice"));
     };
     let disposeRoute;
     try {
@@ -230,7 +242,8 @@ var tui_default = Plugin.define({
         render: () => {
           if (!sidebarVisible()) return null;
           const entries = readIndex(root);
-          return /* @__PURE__ */ React.createElement("box", { flexDirection: "column" }, /* @__PURE__ */ React.createElement("box", { onMouseDown: openAudioTool }, /* @__PURE__ */ React.createElement("text", null, "\u{1F399} voice \xB7 open audio tool")), entries.map((entry) => /* @__PURE__ */ React.createElement("text", null, `  ${entryLabel(entry)}  ${entry.seconds ? `${entry.seconds}s` : ""}  ${age(entry.at)}`)));
+          const cache = readState(root).cache;
+          return /* @__PURE__ */ React.createElement("box", { flexDirection: "column" }, /* @__PURE__ */ React.createElement("box", { onMouseDown: openAudioTool }, /* @__PURE__ */ React.createElement("text", null, "\u{1F399} voice \xB7 open audio tool")), entries.map((entry) => /* @__PURE__ */ React.createElement("text", null, `  ${entryLabel(entry)}  ${entry.seconds ? `${entry.seconds}s` : ""}  ${age(entry.at)}`)), cache ? /* @__PURE__ */ React.createElement("text", null, `  cache ${formatBytes(cache.bytes)} \xB7 ${cache.files} file${cache.files === 1 ? "" : "s"}`) : null);
         }
       });
       if (typeof slot === "function") disposers.push(slot);

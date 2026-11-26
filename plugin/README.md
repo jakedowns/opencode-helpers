@@ -191,6 +191,10 @@ The result is written to `.voice-state.json` (`lastPurge`) so every client can
 show "removed N files, freed X MB"; the slash/palette path in the TUI and GUI
 shows it immediately, and the Audio panel displays the last result.
 
+Both clients also show current cache usage: the GUI Audio panel and the TUI
+sidebar render `Cache: 12.3 MB · 15 files`, computed from the reply files in
+`output.directory` (RPC `cache` for the GUI, `.voice-state.json` for the TUI).
+
 ## What is not implemented yet
 
 - `/voice` slash commands. Palette commands and the `voice_control` tool cover

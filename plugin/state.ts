@@ -11,6 +11,7 @@ import path from "node:path"
 export type Scope = "session" | "project" | "global"
 
 export type LastPurge = { at: number; removed: number; bytes: number }
+export type CacheStats = { at: number; files: number; bytes: number }
 
 export type VoiceState = {
   global: boolean
@@ -18,6 +19,7 @@ export type VoiceState = {
   sessions: Record<string, boolean>
   sidebar: boolean
   lastPurge?: LastPurge
+  cache?: CacheStats
 }
 
 const EMPTY: VoiceState = { global: false, projects: {}, sessions: {}, sidebar: true }
@@ -34,6 +36,14 @@ export function readState(root: string): VoiceState {
       projects: parsed?.projects && typeof parsed.projects === "object" ? parsed.projects : {},
       sessions: parsed?.sessions && typeof parsed.sessions === "object" ? parsed.sessions : {},
       sidebar: parsed?.sidebar !== false,
+      cache:
+        parsed?.cache && typeof parsed.cache.at === "number"
+          ? {
+              at: parsed.cache.at,
+              files: Number(parsed.cache.files) || 0,
+              bytes: Number(parsed.cache.bytes) || 0,
+            }
+          : undefined,
       lastPurge:
         parsed?.lastPurge && typeof parsed.lastPurge.at === "number"
           ? {
@@ -89,5 +99,11 @@ export function setSidebar(root: string, visible: boolean): VoiceState {
 export function setLastPurge(root: string, removed: number, bytes: number): VoiceState {
   const state = readState(root)
   state.lastPurge = { at: Date.now(), removed, bytes }
+  return writeState(root, state)
+}
+
+export function setCache(root: string, files: number, bytes: number): VoiceState {
+  const state = readState(root)
+  state.cache = { at: Date.now(), files, bytes }
   return writeState(root, state)
 }

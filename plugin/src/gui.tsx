@@ -13,7 +13,8 @@ import { Voice } from "../rpc.ts"
 type Entry = { path: string; seconds?: number; at: number; session?: string }
 type Mutes = { session: boolean; project: boolean; global: boolean }
 type Purge = { at: number; removed: number; bytes: number }
-type State = { entries: Entry[]; mutes: Mutes; sidebar: boolean; lastPurge?: Purge }
+type Cache = { at: number; files: number; bytes: number }
+type State = { entries: Entry[]; mutes: Mutes; sidebar: boolean; cache?: Cache; lastPurge?: Purge }
 
 type Session = { id: string; directory: string }
 
@@ -94,6 +95,12 @@ function AudioPanel(props: { session: Session }) {
         session {state()?.mutes.session ? "muted" : "on"} · project {state()?.mutes.project ? "muted" : "on"} · global{" "}
         {state()?.mutes.global ? "muted" : "on"}
       </div>
+      <Show when={state()?.cache}>
+        <div style={{ opacity: 0.7 }}>
+          Cache: {formatBytes(state()?.cache?.bytes ?? 0)} · {state()?.cache?.files ?? 0} file
+          {(state()?.cache?.files ?? 0) === 1 ? "" : "s"}
+        </div>
+      </Show>
       <div style={{ display: "flex", gap: "6px", "flex-wrap": "wrap" }}>
         <button type="button" onClick={() => toggle("session")}>
           Mute session
