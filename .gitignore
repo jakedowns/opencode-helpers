@@ -44,3 +44,7 @@ desktop.ini
 piper/
 voices/
 audio-replies/
+
+# Plugin runtime state (mutes, recent-audio index)
+.voice-state.json
+.voice-index.json

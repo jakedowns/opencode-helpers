@@ -1,6 +1,6 @@
 // Load the local plugin for sessions in this repository.
 // Auto-speak is ON for this project while the stub is being exercised.
-// Mute for one session: tools.voice.control {action:"mute", scope:"session"}.
+// Mute from the palette (Voice group) or tools.voice.control. (build 3)
 {
   "$schema": "https://opencode.ai/config.json",
   "plugins": [

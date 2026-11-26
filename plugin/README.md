@@ -47,8 +47,14 @@ Changing `opencode.jsonc` reloads the plugin. `opencode plugin list` should show
   `maxChars`, and speaks. When nothing is speakable it announces the session
   name and says the message was untranscribable instead of going silent.
 - `voice_control` (`tools.voice.control`): `mute`, `unmute`, `status` with
-  `session`, `project`, or `global` scope. Any active mute silences; state is
-  persisted in plugin storage, so it survives reloads.
+  `session`, `project`, or `global` scope. Any active mute silences; state lives
+  in `.voice-state.json` at the plugin root (git-ignored), shared with the TUI.
+- TUI part: a **Voice** group in the command palette (open audio tool, toggle
+  the sidebar, toggle mute for each scope, status toast), a clickable
+  `🎙 voice` button in `sidebar.content` and on the new-tab footer, and an
+  audio tool page (route `voice`) listing recent items with per-scope mute
+  toggles. The sidebar list reads `.voice-index.json` (newest 4, with duration
+  and age) and can be hidden with **Voice: toggle audio sidebar**.
 - Daemon: if the socket is missing, `setup` starts `piperd.py --serve --drain`
   once, guarded by `<queue>/.voice-plugin.pid` created with `O_EXCL`, retrying
   on a 1 s / 5 s / 30 s backoff. A stale pid file is replaced only after its
@@ -57,11 +63,9 @@ Changing `opencode.jsonc` reloads the plugin. `opencode plugin list` should show
 
 ## What is not implemented yet
 
-- `/voice` slash commands. The mutes work today through `voice_control`; the
-  commands land with the TUI part, which can show a toast instead of injecting
-  a synthetic message.
-- Sidebar list of recent audio (`sidebar.content` slot + `.voice-index.json`).
-- Unit tests for the sanitiser and mute precedence.
+- `/voice` slash commands. Palette commands and the `voice_control` tool cover
+  the same ground today.
+- Unit tests for the sanitiser, mute file, and index writer.
 
 ## Verify by hand
 

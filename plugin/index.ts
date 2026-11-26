@@ -9,9 +9,20 @@
  * every failure is logged and returned as tool content.
  */
 import { spawn } from "node:child_process"
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync, writeSync } from "node:fs"
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+  writeSync,
+} from "node:fs"
 import path from "node:path"
 import { Plugin } from "@opencode/plugin"
+import { readState, resolveMutes, setMute } from "./state.ts"
 
 type Options = {
   root?: string
@@ -151,6 +162,31 @@ function slug(text: string): string {
   )
 }
 
+type IndexEntry = { path: string; seconds?: number; at: number; via?: string }
+
+/**
+ * Newest-first list the TUI sidebar reads. Kept at the repo root so the TUI
+ * part does not have to parse the reply config to find output.directory.
+ */
+function recordIndex(root: string, entry: IndexEntry): void {
+  const file = path.join(root, ".voice-index.json")
+  let list: IndexEntry[] = []
+  try {
+    const parsed = JSON.parse(readFileSync(file, "utf8"))
+    if (Array.isArray(parsed)) list = parsed.filter((item) => item && typeof item.path === "string")
+  } catch {
+    /* no index yet */
+  }
+  list.unshift(entry)
+  const tmp = `${file}.part`
+  try {
+    writeFileSync(tmp, `${JSON.stringify(list.slice(0, 50), null, 2)}\n`)
+    renameSync(tmp, file)
+  } catch (error) {
+    log("index write failed", String(error))
+  }
+}
+
 /**
  * Tool path: synthesise to a durable file under output.directory, then enqueue
  * that file. `say` alone would move the item into played/ and leave the caller
@@ -160,17 +196,20 @@ async function speakDurable(
   root: string,
   cwd: string,
   text: string,
-  sessionID?: string,
+  opts: { sessionID?: string; noPreamble?: boolean } = {},
 ): Promise<SpeakResult> {
   const sessionArgs: string[] = []
-  if (sessionID) {
-    const title = await sessionTitle(root, sessionID)
+  if (!opts.noPreamble && opts.sessionID) {
+    const title = await sessionTitle(root, opts.sessionID)
     if (title) sessionArgs.push("--session", title)
   }
 
-  const dry = await run("python3", [path.join(root, "audioq.py"), "say", "--dry-run", ...sessionArgs, text], { cwd })
-  if (dry.code !== 0) throw new Error(dry.stderr.trim().split("\n").filter(Boolean).pop() || "preamble failed")
-  const spoken = dry.stdout.trim() || text
+  let spoken = text
+  if (!opts.noPreamble) {
+    const dry = await run("python3", [path.join(root, "audioq.py"), "say", "--dry-run", ...sessionArgs, text], { cwd })
+    if (dry.code !== 0) throw new Error(dry.stderr.trim().split("\n").filter(Boolean).pop() || "preamble failed")
+    spoken = dry.stdout.trim() || text
+  }
 
   const config = await readConfig(root, cwd)
   const outputDir = config.output?.directory || "/media/share/tmp/audio/opencode-audio-tool"
@@ -218,49 +257,11 @@ async function speakDurable(
   }
 }
 
-async function speak(
-  root: string,
-  cwd: string,
-  text: string,
-  opts: { sessionID?: string; noPreamble?: boolean } = {},
-): Promise<SpeakResult> {
-  const args = [path.join(root, "audioq.py"), "say"]
-  if (opts.noPreamble) args.push("--no-preamble")
-  if (opts.sessionID) {
-    const title = await sessionTitle(root, opts.sessionID)
-    if (title) args.push("--session", title)
-  }
-  args.push(text)
-
-  const result = await run("python3", args, { cwd })
-  if (result.code !== 0) {
-    const lines = result.stderr.trim().split("\n").filter(Boolean)
-    throw new Error(lines.pop() || `audioq exited ${result.code}`)
-  }
-  const lines = result.stdout.trim().split("\n").filter(Boolean)
-  const line = lines.pop() || ""
-  try {
-    return JSON.parse(line) as SpeakResult
-  } catch {
-    throw new Error(`audioq returned no JSON: ${line.slice(0, 200)}`)
-  }
-}
-
 type MuteState = { session: boolean; project: boolean; global: boolean }
 
-function scopeKey(scope: string, location: string, sessionID?: string): string {
-  if (scope === "global") return "mute/global"
-  if (scope === "project") return `mute/project:${location}`
-  return `mute/session:${sessionID ?? "unknown"}`
-}
-
-async function readMutes(ctx: any, location: string, sessionID?: string): Promise<MuteState> {
-  const [global, project, session] = await Promise.all([
-    ctx.storage.get("mute/global").catch(() => false),
-    ctx.storage.get(`mute/project:${location}`).catch(() => false),
-    ctx.storage.get(`mute/session:${sessionID ?? "unknown"}`).catch(() => false),
-  ])
-  return { global: global === true, project: project === true, session: session === true }
+async function readMutes(_ctx: any, root: string, location: string, sessionID?: string): Promise<MuteState> {
+  const state = readState(root)
+  return resolveMutes(state, location, sessionID)
 }
 
 function pidAlive(pid: number): boolean {
@@ -372,7 +373,13 @@ export default Plugin.define({
             const text = String((input as { text?: unknown })?.text ?? "").trim()
             if (!text) return { content: "voice: empty text; nothing to speak." }
             try {
-              const result = await speakDurable(root, location, text, context?.sessionID)
+              const result = await speakDurable(root, location, text, { sessionID: context?.sessionID })
+              recordIndex(root, {
+                path: String(result.path),
+                seconds: result.seconds,
+                at: Date.now(),
+                via: result.via,
+              })
               return { content: JSON.stringify({ ok: true, ...result }) }
             } catch (error) {
               log("voice_speak failed", String(error))
@@ -398,20 +405,17 @@ export default Plugin.define({
           execute: async (input: unknown, context?: { sessionID?: string }) => {
             try {
               const args = (input ?? {}) as { action?: string; scope?: string }
-              const scope = args.scope ?? "session"
-              const key = scopeKey(scope, location, context?.sessionID)
+              const scope = (args.scope ?? "session") as "session" | "project" | "global"
               if (args.action === "status") {
-                const mutes = await readMutes(ctx, location, context?.sessionID)
+                const mutes = resolveMutes(readState(root), location, context?.sessionID)
                 const effective = mutes.global || mutes.project || mutes.session
                 return { content: JSON.stringify({ ok: true, mutes, effective }) }
               }
               if (args.action !== "mute" && args.action !== "unmute") {
                 return { content: "voice: action must be mute, unmute, or status" }
               }
-              await ctx.storage.set(key, args.action === "mute")
-              const mutes = await readMutes(ctx, location, context?.sessionID)
-              const effective = mutes.global || mutes.project || mutes.session
-              return { content: JSON.stringify({ ok: true, scope, mutes, effective }) }
+              const result = setMute(root, scope, location, context?.sessionID, args.action === "mute")
+              return { content: JSON.stringify({ ok: true, scope, mutes: result.mutes, effective: result.effective }) }
             } catch (error) {
               log("voice_control failed", String(error))
               return { content: `voice: ${String(error)}` }
@@ -433,7 +437,7 @@ export default Plugin.define({
     try {
       await ctx.session.hook("experimental.idle", async (event) => {
         try {
-          const mutes = await readMutes(ctx, location, event.sessionID)
+          const mutes = await readMutes(ctx, root, location, event.sessionID)
           if (mutes.global || mutes.project || mutes.session) {
             log(`muted (${JSON.stringify(mutes)})`)
             return
@@ -455,10 +459,12 @@ export default Plugin.define({
             const title = (await sessionTitle(root, event.sessionID)) ?? "this session"
             const notice = noticeTemplate.replaceAll("{session}", title)
             log(`nothing speakable in ${last.id}; announcing`)
-            await speak(root, location, notice, { noPreamble: true })
+            const result = await speakDurable(root, location, notice, { noPreamble: true })
+            recordIndex(root, { path: String(result.path), seconds: result.seconds, at: Date.now(), via: result.via })
             return
           }
-          await speak(root, location, cleaned, { sessionID: event.sessionID })
+          const result = await speakDurable(root, location, cleaned, { sessionID: event.sessionID })
+          recordIndex(root, { path: String(result.path), seconds: result.seconds, at: Date.now(), via: result.via })
         } catch (error) {
           log("auto-speak failed", String(error))
         }
