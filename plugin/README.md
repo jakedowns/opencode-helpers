@@ -189,9 +189,16 @@ trimming to `max_files`. Manual purge, all three clients:
 | slash | `/voice purge [days]` — omit days to purge everything |
 | tool | `voice_purge` with optional `days` |
 
-The result is written to `.voice-state.json` (`lastPurge`) so every client can
-show "removed N files, freed X MB"; the slash/palette path in the TUI and GUI
-shows it immediately, and the Audio panel displays the last result.
+The result is written to `.voice-state.json`: `lastPurge` records the last run
+that actually deleted files, `lastAttempt` every run (including "nothing to
+remove"), so a racing empty purge cannot erase a real result. The Audio panel
+shows "removed N files, freed X MB", or "nothing to remove · previous freed X"
+when the latest attempt found nothing.
+
+From a client, purge and per-row delete are delegated to the host through
+`.voice-requests/` (`kind: "purge"` / `"remove"`); the client polls the shared
+state for the result. A client never deletes files on its own filesystem, where
+the configured output path does not exist.
 
 Both clients also show live state in the GUI Audio panel and TUI sidebar:
 

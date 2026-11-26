@@ -68,6 +68,16 @@ const state = {
       required: ["at", "files", "bytes"],
       additionalProperties: false,
     },
+    lastAttempt: {
+      type: "object",
+      properties: {
+        at: { type: "number" },
+        removed: { type: "number" },
+        bytes: { type: "number" },
+      },
+      required: ["at", "removed", "bytes"],
+      additionalProperties: false,
+    },
     lastPurge: {
       type: "object",
       properties: {

@@ -37,6 +37,11 @@ function readState(root) {
         files: Number(parsed.cache.files) || 0,
         bytes: Number(parsed.cache.bytes) || 0
       } : void 0,
+      lastAttempt: parsed?.lastAttempt && typeof parsed.lastAttempt.at === "number" ? {
+        at: parsed.lastAttempt.at,
+        removed: Number(parsed.lastAttempt.removed) || 0,
+        bytes: Number(parsed.lastAttempt.bytes) || 0
+      } : void 0,
       lastPurge: parsed?.lastPurge && typeof parsed.lastPurge.at === "number" ? {
         at: parsed.lastPurge.at,
         removed: Number(parsed.lastPurge.removed) || 0,

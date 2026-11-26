@@ -26,7 +26,16 @@ import {
 } from "node:fs"
 import path from "node:path"
 import { Plugin } from "@opencode/plugin"
-import { readState, resolveMutes, setAudio, setCache, setLastPurge, setMute, setQueue, setSidebar } from "./state.ts"
+import {
+  readState,
+  resolveMutes,
+  setAudio,
+  setCache,
+  setMute,
+  setPurgeAttempt,
+  setQueue,
+  setSidebar,
+} from "./state.ts"
 import { Voice } from "./rpc.ts"
 
 type Mode = "auto" | "host" | "client" | "remote"
@@ -254,10 +263,10 @@ async function purgeGenerated(
       /* index may not exist yet */
     }
   }
-  // A scheduled sweep that finds nothing must not erase the result of the
-  // sweep that actually deleted the files (another host may have won the race).
+  // A zero-removal run (scheduled sweep, or a purge racing another host) must
+  // not erase the result of the run that actually deleted the files.
   if (result.removed > 0 || options.recordZero !== false) {
-    setLastPurge(root, result.removed, result.bytes)
+    setPurgeAttempt(root, result.removed, result.bytes)
   }
   {
     const usage = cacheUsage(dir)
@@ -441,6 +450,28 @@ async function speakDurable(
     seconds: queued.seconds,
     gen: Number(gen.toFixed(3)),
     via,
+  }
+}
+
+/** Host-directed control request (purge/remove) for client mode. */
+function writeControl(root: string, body: Record<string, unknown>): string {
+  const dir = path.join(root, ".voice-requests")
+  mkdirSync(dir, { recursive: true })
+  const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  const file = path.join(dir, `req-${id}.json`)
+  const tmp = `${file}.part`
+  writeFileSync(tmp, `${JSON.stringify({ id, ...body, created_at: Date.now() })}\n`)
+  renameSync(tmp, file)
+  return id
+}
+
+async function waitForState(root: string, before: number, ms = 8000): Promise<void> {
+  const deadline = Date.now() + ms
+  while (Date.now() < deadline) {
+    const state = readState(root)
+    const latest = Math.max(state.lastPurge?.at ?? 0, state.lastAttempt?.at ?? 0)
+    if (latest > before) return
+    await new Promise((resolve) => setTimeout(resolve, 300))
   }
 }
 
@@ -655,6 +686,7 @@ async function voiceState(
     audio: AudioStatus
     queue: { queued: number; playing: number; failed: number }
     lastPurge?: { at: number; removed: number; bytes: number }
+    lastAttempt?: { at: number; removed: number; bytes: number }
   } = {
     entries,
     mutes: resolveMutes(state, directory, sessionID),
@@ -665,6 +697,7 @@ async function voiceState(
     queue,
   }
   if (state.lastPurge) result.lastPurge = state.lastPurge
+  if (state.lastAttempt) result.lastAttempt = state.lastAttempt
   return result
 }
 
@@ -731,9 +764,33 @@ function startRequestWatcher(root: string, location: string): () => void {
         seen.add(name)
         try {
           const request = JSON.parse(readFileSync(claim, "utf8")) as {
+            kind?: string
             text?: string
             sessionID?: string
             sessionTitle?: string
+            days?: number
+            path?: string
+          }
+          if (request.kind === "purge") {
+            const days = typeof request.days === "number" ? request.days : undefined
+            await purgeGenerated(root, location, days)
+            try {
+              unlinkSync(claim)
+            } catch {
+              /* sweep will clean it */
+            }
+            log("purge request served")
+            continue
+          }
+          if (request.kind === "remove" && request.path) {
+            removeEntry(root, request.path)
+            try {
+              unlinkSync(claim)
+            } catch {
+              /* sweep will clean it */
+            }
+            log("remove request served")
+            continue
           }
           const text = String(request.text ?? "").trim()
           if (!text) {
@@ -894,12 +951,29 @@ export default Plugin.define({
         },
         remove: async (input: unknown) => {
           const args = (input ?? {}) as { directory?: string; sessionID?: string; path?: string }
-          if (args.path) removeEntry(root, args.path)
+          if (args.path) {
+            if (mode === "client") {
+              writeControl(root, { kind: "remove", path: args.path })
+              const deadline = Date.now() + 8000
+              while (Date.now() < deadline) {
+                await new Promise((resolve) => setTimeout(resolve, 300))
+                if (!readIndex(root, 500).some((entry) => entry.path === args.path)) break
+              }
+            } else {
+              removeEntry(root, args.path)
+            }
+          }
           return await voiceState(root, args.directory ?? location, args.sessionID, mode)
         },
         purge: async (input: unknown) => {
           const args = (input ?? {}) as { directory?: string; sessionID?: string; days?: number }
-          await purgeGenerated(root, args.directory ?? location, args.days)
+          if (mode === "client") {
+            const before = readState(root).lastPurge?.at ?? 0
+            writeControl(root, { kind: "purge", days: args.days })
+            await waitForState(root, before)
+          } else {
+            await purgeGenerated(root, args.directory ?? location, args.days)
+          }
           return await voiceState(root, args.directory ?? location, args.sessionID, mode)
         },
         setSidebar: async (input: unknown) => {
@@ -1005,7 +1079,25 @@ export default Plugin.define({
             try {
               const args = (input ?? {}) as { days?: number }
               const days = typeof args.days === "number" ? args.days : undefined
-              const result = await purgeGenerated(root, location, days)
+              let result: { removed: number; bytes: number; freed: string }
+              if (mode === "client") {
+                const before = Math.max(
+                  readState(root).lastPurge?.at ?? 0,
+                  readState(root).lastAttempt?.at ?? 0,
+                )
+                writeControl(root, { kind: "purge", days })
+                await waitForState(root, before)
+                const state = readState(root)
+                const thisAttempt = state.lastAttempt
+                const latest = thisAttempt ?? state.lastPurge
+                result = {
+                  removed: latest?.removed ?? 0,
+                  bytes: latest?.bytes ?? 0,
+                  freed: formatBytes(latest?.bytes ?? 0),
+                }
+              } else {
+                result = await purgeGenerated(root, location, days)
+              }
               return {
                 content: JSON.stringify({
                   ok: true,

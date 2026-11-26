@@ -25,6 +25,7 @@ type State = {
   audio?: Audio
   queue?: QueueStats
   lastPurge?: Purge
+  lastAttempt?: Purge
 }
 
 type Session = { id: string; directory: string }
@@ -99,6 +100,20 @@ function AudioPanel(props: { session: Session }) {
       })
       .then((next: unknown) => setState(next as State))
       .catch(() => {})
+  }
+
+  const purgeText = () => {
+    const last = state()?.lastPurge
+    const attempt = state()?.lastAttempt
+    if (attempt && attempt.removed === 0 && (!last || attempt.at >= last.at)) {
+      return last && last.removed > 0
+        ? `Last purge: nothing to remove · previous freed ${formatBytes(last.bytes)}`
+        : "Last purge: nothing to remove"
+    }
+    if (last) {
+      return `Last purge: removed ${last.removed} file${last.removed === 1 ? "" : "s"}, freed ${formatBytes(last.bytes)}`
+    }
+    return null
   }
 
   const muteLabel = (scope: "session" | "project" | "global", value?: boolean) =>
@@ -203,11 +218,8 @@ function AudioPanel(props: { session: Session }) {
           Purge audio
         </button>
       </div>
-      <Show when={state()?.lastPurge}>
-        <div style={{ opacity: 0.7 }}>
-          Last purge: removed {state()?.lastPurge?.removed} file
-          {state()?.lastPurge?.removed === 1 ? "" : "s"}, freed {formatBytes(state()?.lastPurge?.bytes ?? 0)}
-        </div>
+      <Show when={purgeText()}>
+        <div style={{ opacity: 0.7 }}>{purgeText()}</div>
       </Show>
       <Show when={state()?.entries.length} fallback={<div style={{ opacity: 0.6 }}>No audio yet.</div>}>
         <div

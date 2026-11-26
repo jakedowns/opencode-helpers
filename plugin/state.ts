@@ -21,6 +21,7 @@ export type VoiceState = {
   sessions: Record<string, boolean>
   sidebar: boolean
   lastPurge?: LastPurge
+  lastAttempt?: LastPurge
   cache?: CacheStats
   audio?: AudioStatus
   queue?: QueueStats
@@ -67,6 +68,14 @@ export function readState(root: string): VoiceState {
               at: parsed.cache.at,
               files: Number(parsed.cache.files) || 0,
               bytes: Number(parsed.cache.bytes) || 0,
+            }
+          : undefined,
+      lastAttempt:
+        parsed?.lastAttempt && typeof parsed.lastAttempt.at === "number"
+          ? {
+              at: parsed.lastAttempt.at,
+              removed: Number(parsed.lastAttempt.removed) || 0,
+              bytes: Number(parsed.lastAttempt.bytes) || 0,
             }
           : undefined,
       lastPurge:
@@ -145,5 +154,12 @@ export function setQueue(
 ): VoiceState {
   const state = readState(root)
   state.queue = { at: Date.now(), ...counts }
+  return writeState(root, state)
+}
+
+export function setPurgeAttempt(root: string, removed: number, bytes: number): VoiceState {
+  const state = readState(root)
+  state.lastAttempt = { at: Date.now(), removed, bytes }
+  if (removed > 0) state.lastPurge = state.lastAttempt
   return writeState(root, state)
 }
