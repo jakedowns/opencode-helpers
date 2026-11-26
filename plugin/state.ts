@@ -13,7 +13,7 @@ export type Scope = "session" | "project" | "global"
 export type LastPurge = { at: number; removed: number; bytes: number }
 export type CacheStats = { at: number; files: number; bytes: number }
 export type AudioStatus = { at: number; available: boolean; muted: boolean; volume: number }
-export type QueueStats = { at: number; queued: number; playing: number; failed: number }
+export type QueueStats = { at: number; queued: number; playing: number; failed: number; playingSession?: string }
 
 export type VoiceState = {
   global: boolean
@@ -47,6 +47,9 @@ export function readState(root: string): VoiceState {
               queued: Number(parsed.queue.queued) || 0,
               playing: Number(parsed.queue.playing) || 0,
               failed: Number(parsed.queue.failed) || 0,
+              ...(typeof parsed.queue.playingSession === "string" && parsed.queue.playingSession
+                ? { playingSession: parsed.queue.playingSession }
+                : {}),
             }
           : undefined,
       audio:
@@ -136,7 +139,10 @@ export function setAudio(root: string, status: AudioStatus): VoiceState {
   return writeState(root, state)
 }
 
-export function setQueue(root: string, counts: { queued: number; playing: number; failed: number }): VoiceState {
+export function setQueue(
+  root: string,
+  counts: { queued: number; playing: number; failed: number; playingSession?: string },
+): VoiceState {
   const state = readState(root)
   state.queue = { at: Date.now(), ...counts }
   return writeState(root, state)

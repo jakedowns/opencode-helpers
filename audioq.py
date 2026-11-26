@@ -833,7 +833,7 @@ def drain(queue_dir=None, player=None, once=False, dry_run=False, stop_event=Non
         os.close(lock_fd)
 
 
-def enqueue_file(path, queue_dir=None, text="", dedupe=0.0, gen=0.0):
+def enqueue_file(path, queue_dir=None, text="", dedupe=0.0, gen=0.0, session=None):
     """Queue an existing WAV without moving or copying its original.
 
     The queue entry is a hardlink where the filesystem allows it, so the
@@ -872,6 +872,7 @@ def enqueue_file(path, queue_dir=None, text="", dedupe=0.0, gen=0.0):
         "length_scale": float(LENGTH_SCALE),
         "via": via,
         "source": src,
+        "session": session or "",
     }
     _write_json_atomic(sidecar, data)
     try:
@@ -932,7 +933,8 @@ def _cmd_say(args):
 
 def _cmd_enqueue(args):
     result = enqueue_file(args.path, queue_dir=args.queue_dir,
-                          text=args.text or "", dedupe=args.dedupe)
+                          text=args.text or "", dedupe=args.dedupe,
+                          session=getattr(args, "session", None))
     print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
     return 0
 
@@ -991,6 +993,8 @@ def build_parser():
     enq = sub.add_parser("enqueue", help="queue an existing WAV without re-synthesising")
     enq.add_argument("path", help="path to an existing WAV")
     enq.add_argument("--text", default="", help="transcript for the sidecar")
+    enq.add_argument("--session", default=None,
+                     help="speaking session title, stored in the sidecar")
     enq.add_argument("--dedupe", type=float, default=0.0, metavar="SECONDS")
     _add_queue_arg(enq)
     enq.set_defaults(func=_cmd_enqueue)

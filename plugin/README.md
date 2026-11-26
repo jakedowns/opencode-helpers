@@ -196,9 +196,10 @@ shows it immediately, and the Audio panel displays the last result.
 Both clients also show live state in the GUI Audio panel and TUI sidebar:
 
 ```
+Mode: host · Auto-speak: on          ← clickable: mute all / turn on
 Cache: 4.3 MB · 7 files
-Queue: 0 queued · 0 playing
-Output: 70%            # or "muted"
+Queue: 0 queued · 0 playing — Agent Voice Tool
+Output: 70%                           # "muted", or "host" on a client
 ```
 
 `cache` comes from the reply files in `output.directory`, `queue` from the
@@ -207,8 +208,11 @@ sink. A host refreshes all three every 15 s; a client reads the host's published
 values from `.voice-state.json` instead of measuring its own zeroes, and shows
 `Output: host` when the audio device belongs to the other machine.
 
-Mute buttons show their state — `✓ session muted` vs `○ session on`, with the
-effective mode on the line above ("Auto-speak: muted (project)"). Each row in the
+Mute buttons show their state — `✓ session muted` vs `○ session on`. The
+"Mode: host · Auto-speak: …" line is a button: when anything is muted it clears
+global, project and session mutes in one click; when on, it mutes globally.
+The queue line names the session whose reply is playing, using `--session` on
+`audioq.py enqueue`. Each row in the
 GUI panel has an **✕** that deletes that reply from disk and from the index;
 only paths present in the index can be removed, and both `.wav`/`.mp3` variants
 of that basename go.

@@ -20,6 +20,7 @@ type State = {
   entries: Entry[]
   mutes: Mutes
   sidebar: boolean
+  mode?: "host" | "client" | "remote"
   cache?: Cache
   audio?: Audio
   queue?: QueueStats
@@ -131,10 +132,26 @@ function AudioPanel(props: { session: Session }) {
           Refresh
         </button>
       </div>
-      <div style={{ opacity: 0.8 }}>
-        Auto-speak:{" "}
-        {activeMute() ? <strong>muted ({activeMute()})</strong> : <strong>on</strong>}
-      </div>
+      <button
+        type="button"
+        aria-pressed={!!activeMute()}
+        title={activeMute() ? "Turn auto-speak back on" : "Mute auto-speak everywhere"}
+        onClick={() => void quickToggle()}
+        style={{
+          display: "flex",
+          "justify-content": "space-between",
+          "align-items": "center",
+          gap: "8px",
+          padding: "4px 8px",
+          "font-weight": activeMute() ? "bold" : "normal",
+        }}
+      >
+        <span>
+          Mode: {state()?.mode ?? "?"} · Auto-speak:{" "}
+          {activeMute() ? <strong>muted ({activeMute()})</strong> : <strong>on</strong>}
+        </span>
+        <span style={{ opacity: 0.6 }}>{activeMute() ? "turn on" : "mute all"}</span>
+      </button>
       <Show when={state()?.cache}>
         <div style={{ opacity: 0.7 }}>
           Cache: {formatBytes(state()?.cache?.bytes ?? 0)} · {state()?.cache?.files ?? 0} file
@@ -144,6 +161,7 @@ function AudioPanel(props: { session: Session }) {
       <Show when={state()?.queue}>
         <div style={{ opacity: 0.7 }}>
           Queue: {state()?.queue?.queued ?? 0} queued · {state()?.queue?.playing ?? 0} playing
+          {state()?.queue?.playingSession ? ` — ${state()?.queue?.playingSession}` : ""}
         </div>
       </Show>
       <Show when={state()?.audio}>

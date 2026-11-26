@@ -35,12 +35,14 @@ const state = {
     entries: { type: "array", items: entry },
     mutes,
     sidebar: { type: "boolean" },
+    mode: { type: "string", enum: ["host", "client", "remote"] },
     queue: {
       type: "object",
       properties: {
         queued: { type: "number" },
         playing: { type: "number" },
         failed: { type: "number" },
+        playingSession: { type: "string" },
       },
       required: ["queued", "playing", "failed"],
       additionalProperties: false,
@@ -77,7 +79,7 @@ const state = {
       additionalProperties: false,
     },
   },
-  required: ["entries", "mutes", "sidebar"],
+  required: ["entries", "mutes", "sidebar", "mode"],
   additionalProperties: false,
 } as const
 

@@ -388,11 +388,9 @@ async function speakDurable(
   }
   const gen = (Date.now() - started) / 1000
 
-  const enq = await run(
-    "python3",
-    [path.join(root, "audioq.py"), "enqueue", outFile, "--text", spoken],
-    { cwd },
-  )
+  const enqueueArgs = [path.join(root, "audioq.py"), "enqueue", outFile, "--text", spoken]
+  if (resolvedTitle) enqueueArgs.push("--session", resolvedTitle)
+  const enq = await run("python3", enqueueArgs, { cwd })
   if (enq.code !== 0) {
     const lines = enq.stderr.trim().split("\n").filter(Boolean)
     throw new Error(lines.pop() || `audioq enqueue exited ${enq.code}`)
@@ -560,7 +558,19 @@ async function audioStatus(): Promise<AudioStatus> {
   return value
 }
 
-function queueCounts(): { queued: number; playing: number; failed: number } {
+function playingSession(queueDir: string): string | null {
+  try {
+    const folder = path.join(queueDir, "playing")
+    const sidecar = readdirSync(folder).find((name) => name.endsWith(".json"))
+    if (!sidecar) return null
+    const data = JSON.parse(readFileSync(path.join(folder, sidecar), "utf8")) as { session?: string }
+    return typeof data.session === "string" && data.session ? data.session : null
+  } catch {
+    return null
+  }
+}
+
+function queueCounts(): { queued: number; playing: number; failed: number; playingSession?: string } {
   const dir = process.env.AUDIOQ_DIR || "/tmp/opencode/audio-replies/queue"
   const count = (sub: string): number => {
     try {
@@ -569,7 +579,14 @@ function queueCounts(): { queued: number; playing: number; failed: number } {
       return 0
     }
   }
-  return { queued: count(""), playing: count("playing"), failed: count("failed") }
+  const result: { queued: number; playing: number; failed: number; playingSession?: string } = {
+    queued: count(""),
+    playing: count("playing"),
+    failed: count("failed"),
+  }
+  const session = playingSession(dir)
+  if (session) result.playingSession = session
+  return result
 }
 
 function cacheUsage(dir: string): { files: number; bytes: number } {
@@ -633,6 +650,7 @@ async function voiceState(
     entries: typeof entries
     mutes: ReturnType<typeof resolveMutes>
     sidebar: boolean
+    mode: ResolvedMode
     cache: { files: number; bytes: number }
     audio: AudioStatus
     queue: { queued: number; playing: number; failed: number }
@@ -641,6 +659,7 @@ async function voiceState(
     entries,
     mutes: resolveMutes(state, directory, sessionID),
     sidebar: state.sidebar,
+    mode,
     cache,
     audio,
     queue,
