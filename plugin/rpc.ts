@@ -12,6 +12,7 @@ const entry = {
     path: { type: "string" },
     seconds: { type: "number" },
     at: { type: "number" },
+    session: { type: "string" },
   },
   required: ["path", "at"],
   additionalProperties: false,

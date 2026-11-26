@@ -181,12 +181,16 @@ def resolve_preamble(args, config):
     template = getattr(args, "preamble", None)
     session = getattr(args, "session", None)
     if template is None:
-        section = config.get("preamble")
-        if isinstance(section, dict) and section.get("enabled", True):
+        section = config.get("preamble") if isinstance(config, dict) else None
+        if isinstance(section, dict):
+            if section.get("enabled", True) is False:
+                return None
             template = section.get("template") or DEFAULT_PREAMBLE_TEMPLATE
             session = session or section.get("session")
         else:
-            return None
+            # No config at all is not an opt-out: announce the session with the
+            # default template. `preamble.enabled: false` is the opt-out.
+            template = DEFAULT_PREAMBLE_TEMPLATE
     if not template:
         return None
     if not session:

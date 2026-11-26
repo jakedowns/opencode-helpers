@@ -72,8 +72,8 @@ Only `preamble` is read by the code. The full file — `name`, `version`,
 `opencode-audio-tool/cfg@N`; bump it when keys or their meaning change.
 
 `--no-preamble`, `--session NAME`, `--preamble TEMPLATE`, `--config PATH` and
-`--dry-run` override it per call. With no config file the text is spoken
-unchanged, so existing callers are unaffected.
+`--dry-run` override it per call. With no config file the default template still
+applies; `preamble.enabled: false` is the opt-out.
 
 Paths: `piperd.py` honours `PIPER_BIN` and `PIPER_MODEL`; `audioq.py` honours
 `AUDIOQ_DIR`, `AUDIOQ_SOCK`, `AUDIOQ_PLAYER` and `AUDIOQ_CONFIG`, but its

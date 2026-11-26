@@ -23,8 +23,8 @@ config version contract (`opencode-audio-tool/cfg@N`).
 `.dev/` holds per-user preferences, not project behaviour, and **should be
 git-ignored** — in this repo and in every project that copies the template.
 The committed template is the only shared copy; never commit a real config.
-With no config, `say` speaks the text unchanged, so nothing is required unless
-audio mode is turned on.
+With no config, `say` still announces the session with the default template
+(`{session}, here: {msg}`); `"preamble": {"enabled": false}` is the opt-out.
 
 ## Layout
 
@@ -180,7 +180,8 @@ Portal Test Chamber regression test, here: the sweep finished
 ```
 
 The config is JSONC, taken from `--config PATH`, `$AUDIOQ_CONFIG`, or
-`./.dev/audiomode.jsonc` (in that order). With no config, nothing is prefixed.
+`./.dev/audiomode.jsonc` (in that order). With no config, the default template
+still applies; set `preamble.enabled: false` to speak without a prefix.
 
 `audioq.py` reads **only** the `preamble` object; the rest of the file is the
 agent-facing contract, and `audiomode.example.jsonc` is the full template:

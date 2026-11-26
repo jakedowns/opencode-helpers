@@ -17,7 +17,7 @@ import { readState, resolveMutes, setMute, setSidebar } from "../state.ts"
 import { Voice } from "../rpc.ts"
 
 type Scope = "session" | "project" | "global"
-type IndexEntry = { path: string; seconds?: number; at: number }
+type IndexEntry = { path: string; seconds?: number; at: number; session?: string }
 
 function readIndex(root: string, limit = 4): IndexEntry[] {
   try {
@@ -34,6 +34,13 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
+}
+
+function entryLabel(entry: IndexEntry): string {
+  const name = path.basename(entry.path)
+  if (!entry.session) return name
+  const title = entry.session.length > 10 ? `${entry.session.slice(0, 9)}…` : entry.session
+  return `${title} ${name}`
 }
 
 function age(at: number): string {
@@ -144,7 +151,7 @@ export default Plugin.define({
               <text>  nothing yet</text>
             ) : (
               entries.map((entry) => (
-                <text>{`  ${path.basename(entry.path)}  ${entry.seconds ? `${entry.seconds}s` : ""}  ${age(entry.at)}`}</text>
+                <text>{`  ${entryLabel(entry)}  ${entry.seconds ? `${entry.seconds}s` : ""}  ${age(entry.at)}`}</text>
               ))
             )}
           </box>
@@ -249,7 +256,7 @@ export default Plugin.define({
                 <text>🎙 voice · open audio tool</text>
               </box>
               {entries.map((entry) => (
-                <text>{`  ${path.basename(entry.path)}  ${entry.seconds ? `${entry.seconds}s` : ""}  ${age(entry.at)}`}</text>
+                <text>{`  ${entryLabel(entry)}  ${entry.seconds ? `${entry.seconds}s` : ""}  ${age(entry.at)}`}</text>
               ))}
             </box>
           )

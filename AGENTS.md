@@ -9,8 +9,8 @@ internals) stays in `README.md`, and the portability notes in `REPOSITORY.md`.
 Audio mode is per project and opt-in. It is driven by a JSONC file that
 `audioq.py` resolves, in order, from `--config PATH`, `$AUDIOQ_CONFIG`, then
 `./.dev/audiomode.jsonc` (relative to the **current directory**, not to this
-repo). With no config, `say` speaks the text unchanged — so a project without
-one behaves exactly as before.
+repo). With no config, `say` still uses the default preamble template; set
+`preamble.enabled: false` to speak without a prefix.
 
 To enable it in a project:
 

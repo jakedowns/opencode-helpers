@@ -125,6 +125,7 @@ async function sessionTitle(root: string, sessionID: string | undefined): Promis
 }
 
 type SpeakResult = {
+  title?: string | null
   path?: string
   queue?: string
   seconds?: number
@@ -265,7 +266,7 @@ function slug(text: string): string {
   )
 }
 
-type IndexEntry = { path: string; seconds?: number; at: number; via?: string }
+type IndexEntry = { path: string; seconds?: number; at: number; via?: string; session?: string }
 
 /**
  * Newest-first list the TUI sidebar reads. Kept at the repo root so the TUI
@@ -302,10 +303,8 @@ async function speakDurable(
   opts: { sessionID?: string; noPreamble?: boolean } = {},
 ): Promise<SpeakResult> {
   const sessionArgs: string[] = []
-  if (!opts.noPreamble && opts.sessionID) {
-    const title = await sessionTitle(root, opts.sessionID)
-    if (title) sessionArgs.push("--session", title)
-  }
+  const resolvedTitle = opts.sessionID ? await sessionTitle(root, opts.sessionID) : null
+  if (!opts.noPreamble && resolvedTitle) sessionArgs.push("--session", resolvedTitle)
 
   let spoken = text
   if (!opts.noPreamble) {
@@ -376,6 +375,7 @@ async function speakDurable(
     }
   }
   return {
+    title: resolvedTitle,
     path: linkFile,
     queue: queued.path,
     id: queued.id,
@@ -482,7 +482,12 @@ function readIndex(root: string, limit = 20): IndexEntry[] {
 function voiceState(root: string, directory: string, sessionID?: string) {
   const state = readState(root)
   return {
-    entries: readIndex(root).map((entry) => ({ path: entry.path, seconds: entry.seconds, at: entry.at })),
+    entries: readIndex(root).map((entry) => ({
+      path: entry.path,
+      seconds: entry.seconds,
+      at: entry.at,
+      session: entry.session,
+    })),
     mutes: resolveMutes(state, directory, sessionID),
     sidebar: state.sidebar,
     lastPurge: state.lastPurge,
@@ -492,13 +497,16 @@ function voiceState(root: string, directory: string, sessionID?: string) {
 type RequestResult = { requested: true; id: string }
 
 /** Client mode: hand the text to the host through the shared folder. */
-function writeRequest(root: string, text: string, sessionID?: string): RequestResult {
+function writeRequest(root: string, text: string, sessionID?: string, sessionTitle?: string | null): RequestResult {
   const dir = path.join(root, ".voice-requests")
   mkdirSync(dir, { recursive: true })
   const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
   const file = path.join(dir, `req-${id}.json`)
   const tmp = `${file}.part`
-  writeFileSync(tmp, `${JSON.stringify({ id, text, sessionID, created_at: Date.now() })}\n`)
+  writeFileSync(
+    tmp,
+    `${JSON.stringify({ id, text, sessionID, sessionTitle, created_at: Date.now() })}\n`,
+  )
   renameSync(tmp, file)
   return { requested: true, id }
 }
@@ -551,6 +559,7 @@ function startRequestWatcher(root: string, location: string): () => void {
           const request = JSON.parse(readFileSync(claim, "utf8")) as {
             text?: string
             sessionID?: string
+            sessionTitle?: string
           }
           const text = String(request.text ?? "").trim()
           if (!text) {
@@ -563,6 +572,7 @@ function startRequestWatcher(root: string, location: string): () => void {
             seconds: result.seconds,
             at: Date.now(),
             via: "request",
+            session: request.sessionTitle ?? result.title ?? undefined,
           })
           try {
             unlinkSync(claim)
@@ -724,6 +734,7 @@ export default Plugin.define({
                 seconds: result.seconds,
                 at: Date.now(),
                 via: result.via,
+                session: result.title ?? undefined,
               })
               return { content: JSON.stringify({ ok: true, ...result }) }
             } catch (error) {
@@ -835,9 +846,10 @@ export default Plugin.define({
             return
           }
           if (mode === "client") {
-            const title = cleaned ? "" : ((await sessionTitle(root, event.sessionID)) ?? "this session")
+            const resolved = await sessionTitle(root, event.sessionID)
+            const title = cleaned ? resolved : (resolved ?? "this session")
             const payload = cleaned || noticeTemplate.replaceAll("{session}", title)
-            const request = writeRequest(root, payload, event.sessionID)
+            const request = writeRequest(root, payload, event.sessionID, resolved)
             log(`requested ${request.id}${cleaned ? "" : " (untranscribable notice)"}`)
             return
           }
@@ -845,12 +857,24 @@ export default Plugin.define({
             const title = (await sessionTitle(root, event.sessionID)) ?? "this session"
             const notice = noticeTemplate.replaceAll("{session}", title)
             log(`nothing speakable in ${last.id}; announcing`)
-            const result = await speakDurable(root, location, notice, { noPreamble: true })
-            recordIndex(root, { path: String(result.path), seconds: result.seconds, at: Date.now(), via: result.via })
+            const result = await speakDurable(root, location, notice, { sessionID: event.sessionID, noPreamble: true })
+            recordIndex(root, {
+              path: String(result.path),
+              seconds: result.seconds,
+              at: Date.now(),
+              via: result.via,
+              session: result.title ?? title,
+            })
             return
           }
           const result = await speakDurable(root, location, cleaned, { sessionID: event.sessionID })
-          recordIndex(root, { path: String(result.path), seconds: result.seconds, at: Date.now(), via: result.via })
+          recordIndex(root, {
+            path: String(result.path),
+            seconds: result.seconds,
+            at: Date.now(),
+            via: result.via,
+            session: result.title ?? undefined,
+          })
         } catch (error) {
           log("auto-speak failed", String(error))
         }

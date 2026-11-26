@@ -10,7 +10,7 @@ import type { PanelTab } from "@opencode/plugin/gui"
 import { For, Show, createSignal } from "solid-js"
 import { Voice } from "../rpc.ts"
 
-type Entry = { path: string; seconds?: number; at: number }
+type Entry = { path: string; seconds?: number; at: number; session?: string }
 type Mutes = { session: boolean; project: boolean; global: boolean }
 type Purge = { at: number; removed: number; bytes: number }
 type State = { entries: Entry[]; mutes: Mutes; sidebar: boolean; lastPurge?: Purge }
@@ -31,6 +31,13 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
+}
+
+function entryLabel(entry: Entry): string {
+  const name = entry.path.split("/").pop() ?? entry.path
+  if (!entry.session) return name
+  const title = entry.session.length > 10 ? `${entry.session.slice(0, 9)}…` : entry.session
+  return `${title} ${name}`
 }
 
 function age(at: number): string {
@@ -113,7 +120,7 @@ function AudioPanel(props: { session: Session }) {
             {(entry: Entry) => (
               <div style={{ display: "flex", "justify-content": "space-between", gap: "8px" }}>
                 <span style={{ overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap" }}>
-                  {entry.path.split("/").pop()}
+                  {entryLabel(entry)}
                 </span>
                 <span style={{ opacity: 0.6 }}>
                   {entry.seconds ? `${entry.seconds}s · ` : ""}
