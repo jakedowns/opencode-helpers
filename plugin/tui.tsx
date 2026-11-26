@@ -49,6 +49,47 @@ export default Plugin.define({
       ctx.ui.toast.show({ message: `voice: sidebar ${next ? "shown" : "hidden"}`, variant: "info" })
     }
 
+    /**
+     * One `/voice` namespace mirroring the palette:
+     *   /voice                      open the audio tool
+     *   /voice status
+     *   /voice mute|unmute [scope]
+     *   /voice toggle [scope]
+     *   /voice sidebar
+     */
+    const runVoiceCommand = (input?: string) => {
+      const args = (input ?? "").trim().split(/\s+/).filter(Boolean)
+      const verb = (args[0] ?? "").toLowerCase()
+      const scope = (args[1] ?? "session") as Scope
+      const validScope = scope === "session" || scope === "project" || scope === "global"
+
+      if (!verb || verb === "open" || verb === "tool") return openAudioTool()
+      if (verb === "status") {
+        return ctx.ui.toast.show({ message: `voice: ${statusLine()}`, variant: "info" })
+      }
+      if (verb === "sidebar") return toggleSidebar()
+      if (verb === "mute" || verb === "unmute") {
+        if (!validScope) {
+          return ctx.ui.toast.show({ message: "voice: scope must be session, project, or global", variant: "warning" })
+        }
+        const result = setMute(root, scope, location, currentSession(), verb === "mute")
+        return ctx.ui.toast.show({
+          message: `voice: ${scope} auto-speak ${result.effective ? "muted" : "on"}`,
+          variant: "info",
+        })
+      }
+      if (verb === "toggle") {
+        if (!validScope) {
+          return ctx.ui.toast.show({ message: "voice: scope must be session, project, or global", variant: "warning" })
+        }
+        return toggle(scope)
+      }
+      return ctx.ui.toast.show({
+        message: "voice: /voice [open|status|mute|unmute|toggle|sidebar] [session|project|global]",
+        variant: "warning",
+      })
+    }
+
     const currentSession = (): string | undefined => {
       const route = ctx.ui.router.current() as { type?: string; sessionID?: string } | undefined
       return route?.type === "session" ? route.sessionID : undefined
@@ -128,7 +169,8 @@ export default Plugin.define({
             title: "Voice: open audio tool",
             group: "Voice",
             palette: true,
-            run: openAudioTool,
+            slash: { name: "voice", aliases: ["audio"], arguments: true },
+            run: (input?: string) => runVoiceCommand(input),
           },
           {
             id: "assistant-voice.sidebar",

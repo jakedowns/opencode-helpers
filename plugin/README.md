@@ -55,6 +55,19 @@ Changing `opencode.jsonc` reloads the plugin. `opencode plugin list` should show
   audio tool page (route `voice`) listing recent items with per-scope mute
   toggles. The sidebar list reads `.voice-index.json` (newest 4, with duration
   and age) and can be hidden with **Voice: toggle audio sidebar**.
+
+### `/voice` slash commands
+
+The palette group and the slash command share one dispatcher:
+
+| Command | Effect |
+|---|---|
+| `/voice` (or `/audio`) | open the audio tool page |
+| `/voice status` | toast the session/project/global mute state |
+| `/voice mute [scope]` | mute; scope defaults to `session` |
+| `/voice unmute [scope]` | unmute that scope |
+| `/voice toggle [scope]` | flip that scope |
+| `/voice sidebar` | show or hide the sidebar section |
 - Daemon: if the socket is missing, `setup` starts `piperd.py --serve --drain`
   once, guarded by `<queue>/.voice-plugin.pid` created with `O_EXCL`, retrying
   on a 1 s / 5 s / 30 s backoff. A stale pid file is replaced only after its
