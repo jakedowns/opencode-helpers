@@ -69,10 +69,32 @@ export type VoiceState = {
   stats?: VoiceStats
   hostHeartbeat?: HostHeartbeat
   hosts?: Record<string, number>
-  playback?: Playback
+  /** Current item per host machine, so one host's tick cannot clear another's. */
+  playbacks?: Record<string, Playback>
 }
 
 const EMPTY: VoiceState = { global: false, projects: {}, sessions: {}, sidebar: true }
+
+function normalisePlayback(raw: unknown): Playback {
+  const value = (raw ?? {}) as {
+    at?: unknown
+    seconds?: unknown
+    position?: unknown
+    paused?: unknown
+    source?: unknown
+    file?: unknown
+    session?: unknown
+  }
+  return {
+    at: Number(value.at) || 0,
+    seconds: Number(value.seconds) || 0,
+    position: Number(value.position) || 0,
+    paused: value.paused === true,
+    source: value.source === "host" ? "host" : "local",
+    ...(typeof value.file === "string" && value.file ? { file: value.file } : {}),
+    ...(typeof value.session === "string" && value.session ? { session: value.session } : {}),
+  }
+}
 
 export function statePath(root: string): string {
   return path.join(root, ".voice-state.json")
@@ -183,21 +205,13 @@ export function readState(root: string): VoiceState {
                 .map(([machine, at]) => [machine, Number(at)]),
             )
           : undefined,
-      playback:
-        parsed?.playback && typeof parsed.playback.at === "number"
-          ? {
-              at: Number(parsed.playback.at),
-              seconds: Number(parsed.playback.seconds) || 0,
-              position: Number(parsed.playback.position) || 0,
-              paused: parsed.playback.paused === true,
-              source: parsed.playback.source === "host" ? "host" : "local",
-              ...(typeof parsed.playback.file === "string" && parsed.playback.file
-                ? { file: parsed.playback.file }
-                : {}),
-              ...(typeof parsed.playback.session === "string" && parsed.playback.session
-                ? { session: parsed.playback.session }
-                : {}),
-            }
+      playbacks:
+        parsed?.playbacks && typeof parsed.playbacks === "object" && !Array.isArray(parsed.playbacks)
+          ? Object.fromEntries(
+              Object.entries(parsed.playbacks)
+                .filter(([, value]) => value && typeof (value as { at?: unknown }).at === "number")
+                .map(([machine, value]) => [machine, normalisePlayback(value)]),
+            )
           : undefined,
     }
   } catch {
@@ -500,10 +514,22 @@ export function setHostHeartbeat(root: string, machine: string): VoiceState {
   return writeState(root, state)
 }
 
-/** Publish (or clear) the item a host's drainer is currently playing. */
-export function setPlayback(root: string, playback: Playback | null): VoiceState {
+/** Publish (or clear) the item a host's drainer is currently playing.
+ *
+ * Keyed by hostname: both machines write the same shared state file, and a
+ * host with an empty queue must not clear the other host's position (that
+ * made the panel's controls flicker away every 2 s).
+ */
+export function setPlayback(root: string, machine: string, playback: Playback | null): VoiceState {
   const state = readState(root)
-  if (playback) state.playback = playback
-  else delete state.playback
+  const playbacks: Record<string, Playback> = { ...(state.playbacks ?? {}) }
+  if (playback) playbacks[machine] = playback
+  else delete playbacks[machine]
+  const now = Date.now()
+  for (const [name, value] of Object.entries(playbacks)) {
+    if (now - value.at > 30_000) delete playbacks[name]
+  }
+  if (Object.keys(playbacks).length > 0) state.playbacks = playbacks
+  else delete state.playbacks
   return writeState(root, state)
 }

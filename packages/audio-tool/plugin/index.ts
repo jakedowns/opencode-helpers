@@ -74,6 +74,18 @@ type Options = {
 const DEFAULT_ROOT = "/media/share/opencode-audio-tool"
 const DEFAULT_NOTICE = "{session} here: my last message was untranscribable, check the app"
 const DEFAULT_MAX_CHARS = 2000
+
+/** Shown in the panel; read once so a version bump needs no code change. */
+const PLUGIN_VERSION: string = (() => {
+  try {
+    const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as {
+      version?: unknown
+    }
+    return typeof pkg.version === "string" ? pkg.version : ""
+  } catch {
+    return ""
+  }
+})()
 const DEFAULT_AUDIO_ROOT = "/media/share/tmp/audio"
 const DEFAULT_QUEUE = "/tmp/opencode/audio-replies/queue"
 const DEFAULT_SOCK = "/tmp/opencode/audio-replies/piperd.sock"
@@ -1601,6 +1613,7 @@ async function voiceState(
     modeSource: "option" | "override" | "auto"
     modeOverride: ModeOverride
     canHost: boolean
+    version: string
     source: "local" | "host"
     statsAgeMs: number
     cache: { files: number; bytes: number }
@@ -1625,6 +1638,7 @@ async function voiceState(
     modeSource: modeOrigin,
     modeOverride: readModeOverride(root),
     canHost: piperBinary(hostOptions, root, pluginConfig) !== null,
+    version: PLUGIN_VERSION,
     source: mode === "client" ? "host" : "local",
     statsAgeMs: Math.max(
       0,
@@ -1649,8 +1663,17 @@ async function voiceState(
   {
     const local = mode === "client" ? localPlaybackInfo() : hostPlayback()
     if (local) result.playback = local
-    else if (mode === "client" && state.playback) {
-      result.playback = { ...state.playback, source: "host" }
+    else if (mode === "client") {
+      // Another machine is hosting; pick its freshest entry. Our own (possibly
+      // stale, from before a mode switch) entry is ignored.
+      const self = hostname()
+      const now = Date.now()
+      let best: Playback | undefined
+      for (const [machine, item] of Object.entries(state.playbacks ?? {})) {
+        if (machine === self || now - item.at > 15_000) continue
+        if (!best || item.at > best.at) best = item
+      }
+      if (best) result.playback = { ...best, source: "host" }
     }
   }
   {
@@ -1922,7 +1945,7 @@ export default Plugin.define({
           const usage = cacheUsage()
           setCache(root, usage.files, usage.bytes)
           setQueue(root, queueCounts())
-          setPlayback(root, hostPlayback())
+          setPlayback(root, hostname(), hostPlayback())
           setGenerating(root, activeSpeak + processingCount(root))
           setAudio(root, await audioStatus())
         })().catch((error) => log("stats refresh failed", String(error)))
@@ -1969,7 +1992,7 @@ export default Plugin.define({
       modeStopper?.()
       modeStopper = undefined
       const previous = mode
-      if (previous === "host" && next !== "host") setPlayback(root, null)
+      if (previous === "host" && next !== "host") setPlayback(root, hostname(), null)
       mode = next
       activeMode = next
       if (next === "host") {

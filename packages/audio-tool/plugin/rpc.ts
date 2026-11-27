@@ -48,6 +48,7 @@ const state = {
       additionalProperties: false,
     },
     canHost: { type: "boolean" },
+    version: { type: "string" },
     hostHeartbeat: {
       type: "object",
       properties: {
@@ -201,6 +202,7 @@ const state = {
     "modeSource",
     "modeOverride",
     "canHost",
+    "version",
     "source",
     "statsAgeMs",
     "generating",

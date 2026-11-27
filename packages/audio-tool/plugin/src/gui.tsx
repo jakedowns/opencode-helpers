@@ -31,6 +31,7 @@ type State = {
   entries: Entry[]
   mutes: Mutes
   sidebar: boolean
+  version?: string
   mode?: "host" | "client" | "remote"
   modeSource?: "option" | "override" | "auto"
   modeOverride?: { at: number; mode: "auto" | "host" | "client" }
@@ -332,7 +333,12 @@ function AudioPanel(props: { session: Session }) {
         .voice-btn-icon { padding: 0 6px; }
       `}</style>
       <div style={{ display: "flex", "justify-content": "space-between", "align-items": "center" }}>
-        <strong>Audio</strong>
+        <div style={{ display: "flex", "align-items": "baseline", gap: "8px" }}>
+          <strong>Audio</strong>
+          <Show when={state()?.version}>
+            <span style={{ opacity: 0.55, "font-size": "11px" }}>v{state()?.version}</span>
+          </Show>
+        </div>
         <button type="button" className="voice-btn" onClick={() => void refresh()}>
           Refresh
         </button>
