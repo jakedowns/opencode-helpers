@@ -262,7 +262,7 @@ the configured output path does not exist.
 Both clients also show live state in the GUI Audio panel and TUI sidebar:
 
 ```
-Mode: host · Auto-speak: on          ← clickable: mute all / turn on
+Mode: host · Data: local (5s old) · Auto-speak: on   ← clickable: mute all / turn on
 Cache: 4.3 MB · 7 files
 Queue: 0 queued · 1 playing · 2 generating — Agent Voice Tool
 Volume [==========|-------] 70%       ← slider; "host" on a client
@@ -272,6 +272,11 @@ Last purge: removed 2 files, freed 919.3 KB
 `generating` counts synthesis in flight (active speaks plus claimed
 `.voice-requests`). When nothing is playing, the queue line keeps the most
 recent speaker as `latest: <name>` instead of going blank.
+
+`Data` names where the panel's numbers came from: `local` for a host that
+measured them itself, `host` for a client reading the shared state, followed by
+the age of the oldest statistic. Flip-flopping values with a changing label is
+the signature of two hosts publishing different stats.
 
 `cache` is one canonical number: all `reply-*.wav|mp3` under
 `/media/share/tmp/audio` (the shared audio root and its project subdirectories),

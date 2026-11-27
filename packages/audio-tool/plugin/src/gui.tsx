@@ -23,6 +23,8 @@ type State = {
   mutes: Mutes
   sidebar: boolean
   mode?: "host" | "client" | "remote"
+  source?: "local" | "host"
+  statsAgeMs?: number
   cache?: Cache
   audio?: Audio
   queue?: QueueStats
@@ -206,7 +208,11 @@ function AudioPanel(props: { session: Session }) {
         }}
       >
         <span>
-          Mode: {state()?.mode ?? "?"} · Auto-speak:{" "}
+          Mode: {state()?.mode ?? "?"} · Data: {state()?.source ?? "?"}
+          {typeof state()?.statsAgeMs === "number"
+            ? ` (${Math.max(0, Math.round((state()?.statsAgeMs ?? 0) / 1000))}s old)`
+            : ""}{" "}
+          · Auto-speak:{" "}
           {activeMute() ? <strong>muted ({activeMute()})</strong> : <strong>on</strong>}
         </span>
         <span style={{ opacity: 0.6 }}>{activeMute() ? "turn on" : "mute all"}</span>

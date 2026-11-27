@@ -37,6 +37,8 @@ const state = {
     mutes,
     sidebar: { type: "boolean" },
     mode: { type: "string", enum: ["host", "client", "remote"] },
+    source: { type: "string", enum: ["local", "host"] },
+    statsAgeMs: { type: "number" },
     generating: { type: "number" },
     queue: {
       type: "object",
@@ -101,7 +103,7 @@ const state = {
       additionalProperties: false,
     },
   },
-  required: ["entries", "mutes", "sidebar", "mode", "generating"],
+  required: ["entries", "mutes", "sidebar", "mode", "source", "statsAgeMs", "generating"],
   additionalProperties: false,
 } as const
 

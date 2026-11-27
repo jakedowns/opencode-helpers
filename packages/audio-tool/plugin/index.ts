@@ -923,6 +923,8 @@ async function voiceState(
     mutes: ReturnType<typeof resolveMutes>
     sidebar: boolean
     mode: ResolvedMode
+    source: "local" | "host"
+    statsAgeMs: number
     cache: { files: number; bytes: number }
     audio: AudioStatus
     queue: { queued: number; playing: number; failed: number }
@@ -935,6 +937,11 @@ async function voiceState(
     mutes: resolveMutes(state, directory, sessionID),
     sidebar: state.sidebar,
     mode,
+    source: mode === "client" ? "host" : "local",
+    statsAgeMs: Math.max(
+      0,
+      Date.now() - Math.min(cache.at || Date.now(), audio.at || Date.now()),
+    ),
     generating: activeSpeak + processingCount(root),
     cache,
     audio,
