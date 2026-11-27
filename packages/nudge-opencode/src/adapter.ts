@@ -110,6 +110,22 @@ function producerMatches(producer: string, prefixes: readonly string[]): boolean
   return prefixes.some((prefix) => producer === prefix || producer.startsWith(`${prefix}.`));
 }
 
+/** The grace clock a producer belongs to, when grace applies. */
+function graceGroup(producer: string): string | null {
+  return GRACE_PRODUCERS.find((prefix) => producerMatches(producer, [prefix])) ?? null;
+}
+
+/**
+ * Grace is keyed per producer group once the activity map exists. Legacy state
+ * only has `lastProgressAt`, so keep using it until the next touch migrates.
+ */
+function graceAt(session: NudgeSessionState, group: string): number {
+  if (!session.activity) return session.lastProgressAt;
+  const at = session.activity[group] ?? 0;
+  if (at > 0 || group === "say") return at;
+  return session.lastProgressAt;
+}
+
 export function createNudgeAdapter(host: NudgeHost, options: NudgeAdapterOptions): NudgeAdapter {
   const file = options.statePath ?? defaultStatePath();
   const standingKey = options.standingKey ?? NUDGE_STANDING_KEY;
@@ -149,15 +165,13 @@ export function createNudgeAdapter(host: NudgeHost, options: NudgeAdapterOptions
           outcome = { applied: false, reason: "gap" };
           return;
         }
-        if (
-          muting &&
-          graceMs > 0 &&
-          session.lastProgressAt > 0 &&
-          at - session.lastProgressAt < graceMs &&
-          producerMatches(candidate.producer, GRACE_PRODUCERS)
-        ) {
-          outcome = { applied: false, reason: "grace" };
-          return;
+        if (muting && graceMs > 0) {
+          const group = graceGroup(candidate.producer);
+          const graceStart = group ? graceAt(session, group) : 0;
+          if (graceStart > 0 && at - graceStart < graceMs) {
+            outcome = { applied: false, reason: "grace" };
+            return;
+          }
         }
         if (
           muting &&
@@ -241,14 +255,22 @@ export function createNudgeAdapter(host: NudgeHost, options: NudgeAdapterOptions
       }
     },
 
-    async touch(sessionID) {
+    async touch(sessionID, producer) {
       const at = now();
+      const say = producer === "say" || (producer?.startsWith("say.") ?? false);
       withState(file, (state) => {
         const session = (state.sessions[sessionID] ??= emptySession());
-        session.lastProgressAt = at;
+        session.activity ??= {};
+        if (say) {
+          session.activity.say = at;
+        } else {
+          session.lastProgressAt = at;
+          session.activity["progress.tree"] = at;
+          session.activity["progress.stale"] = at;
+        }
         session.fires = 0;
       });
-      host.log?.({ event: "nudge-touch", sessionID });
+      host.log?.({ event: "nudge-touch", sessionID, producer: producer ?? "progress" });
     },
 
     async mute(sessionID, minutes) {
@@ -286,6 +308,8 @@ export function createNudgeAdapter(host: NudgeHost, options: NudgeAdapterOptions
         mutedUntil: session.mutedUntil,
         standing: session.standing,
         fires: session.fires,
+        lastProgressAt: session.lastProgressAt,
+        activity: session.activity,
       };
     },
   };

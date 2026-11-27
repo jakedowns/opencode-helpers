@@ -42,12 +42,15 @@ export interface NudgeAdapterStatus {
   mutedUntil: number;
   standing?: NudgeSessionState["standing"];
   fires: number;
+  lastProgressAt?: number;
+  activity?: Record<string, number>;
 }
 
 export interface NudgeAdapter {
   submit(candidate: NudgeCandidate): Promise<NudgeGateResult> | NudgeGateResult;
   clear(sessionID: string, producer?: string): Promise<void> | void;
-  touch(sessionID: string): Promise<void> | void;
+  /** Mark producer activity; omitted producer means a progress write. */
+  touch(sessionID: string, producer?: string): Promise<void> | void;
   mute(sessionID: string, minutes: number): Promise<void> | void;
   unmute(sessionID: string): Promise<void> | void;
   status(sessionID: string): NudgeAdapterStatus;

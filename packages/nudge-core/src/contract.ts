@@ -111,7 +111,10 @@ export interface NudgeStanding {
 export interface NudgeSessionState {
   mutedUntil: number;
   lastReminderAt: number;
+  /** Last progress-write activity (legacy shared clock). */
   lastProgressAt: number;
+  /** Per-producer grace clocks, e.g. `say`, `progress.tree`. */
+  activity?: Record<string, number>;
   fires: number;
   standing?: NudgeStanding;
 }

@@ -117,15 +117,34 @@ test('gap suppresses non-block, block bypasses', async () => {
   }
 });
 
-test('grace after touch suppresses strict/say, not custom', async () => {
+test('grace is keyed per producer group', async () => {
   const h = harness({ graceMs: 600_000 });
   try {
-    await h.adapter.touch('ses_a');
+    await h.adapter.touch('ses_a'); // progress write
     assert.equal((await h.adapter.submit(candidate())).reason, 'grace');
+    // A progress write does not buy silence for say.
     assert.equal(
-      (await h.adapter.submit(candidate({ producer: 'custom.rule', ruleId: 'x', at: h.now() + 1 }))).applied,
+      (await h.adapter.submit(candidate({ producer: 'say', at: h.now() + 1 }))).applied,
       true
     );
+
+    await h.adapter.touch('ses_a', 'say');
+    assert.equal(
+      (await h.adapter.submit(candidate({ producer: 'say', text: 'note again', at: h.now() + 2 }))).reason,
+      'grace'
+    );
+    assert.equal(
+      (
+        await h.adapter.submit(
+          candidate({ producer: 'custom.rule', ruleId: 'x', text: 'custom text', at: h.now() + 3 })
+        )
+      ).applied,
+      true
+    );
+
+    const status = h.adapter.status('ses_a');
+    assert.equal(status.activity.say, h.now());
+    assert.equal(status.activity['progress.tree'], h.now());
   } finally {
     h.cleanup();
   }
