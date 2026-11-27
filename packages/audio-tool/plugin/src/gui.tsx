@@ -518,7 +518,7 @@ export default Plugin.define({
                 }
               : { name: voiceSlashName(spec) },
           ...(spec.id === "open" ? { featured: true } : {}),
-          run: (value?: string) => runCommand(value ?? spec.input),
+          run: (value?: string) => runCommand(value?.trim() ? value : spec.input),
         }),
       )
     }

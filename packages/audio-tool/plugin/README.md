@@ -194,6 +194,24 @@ The dispatcher itself:
   owner is confirmed dead.
 - Failures are logged and returned as tool content; nothing throws into a turn.
 
+## Diagnostics
+
+Every repeat/summary/replay transition is appended to `.voice-log.jsonl` at the
+package root (git-ignored):
+
+```sh
+tail -f /media/share/opencode-audio-tool/.voice-log.jsonl
+{"at":"…","kind":"repeat","status":"running"}
+{"at":"…","kind":"repeat","status":"ok","detail":"11.51s"}
+```
+
+The same outcome appears in the panel as `Last: repeat ✓ 11.51s`. Queue playback
+history lives in `/tmp/opencode/audio-replies/queue/drain.log`.
+
+The build is also defensive about this share: piper's output is polled for up to
+2 s before enqueue, and a "no such file" enqueue is retried once, because SMB
+writeback can lag the process exit.
+
 ## Subagents
 
 A subagent is a session with a `parentID`. Auto-speak skips those by default

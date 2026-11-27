@@ -233,6 +233,34 @@ function voiceModel(config: ReplyConfig, root: string, sessionID?: string, expli
   return config.synthesis?.model || path.join(root, "voices", "voice.onnx")
 }
 
+/** Append-only action log so failures are visible outside the panel/model. */
+function logAction(root: string, kind: string, status: string, detail?: string): void {
+  const file = path.join(root, ".voice-log.jsonl")
+  const line = JSON.stringify({ at: new Date().toISOString(), kind, status, ...(detail ? { detail } : {}) })
+  try {
+    writeFileSync(file, `${line}\n`, { flag: "a" })
+  } catch {
+    /* logging must never break a command */
+  }
+}
+
+async function fileReady(target: string, ms = 2000): Promise<boolean> {
+  const deadline = Date.now() + ms
+  while (Date.now() < deadline) {
+    try {
+      if (existsSync(target) && statSync(target).size > 0) return true
+    } catch {
+      /* not yet visible */
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+  try {
+    return existsSync(target) && statSync(target).size > 0
+  } catch {
+    return false
+  }
+}
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
@@ -664,11 +692,22 @@ async function speakDurableInner(
     const lines = synth.stderr.trim().split("\n").filter(Boolean)
     throw new Error(lines.pop() || `piper exited ${synth.code}`)
   }
+  if (!(await fileReady(outFile))) {
+    const lines = synth.stderr.trim().split("\n").filter(Boolean)
+    throw new Error(`piper wrote no file (${lines.slice(-2).join(" / ") || "no stderr"})`)
+  }
   const gen = (Date.now() - started) / 1000
 
   const enqueueArgs = [path.join(root, "audioq.py"), "enqueue", outFile, "--text", spoken]
   if (resolvedTitle) enqueueArgs.push("--session", resolvedTitle)
-  const enq = await run("python3", enqueueArgs, { cwd })
+  let enq = await run("python3", enqueueArgs, { cwd })
+  if (enq.code !== 0 && /no such file/i.test(enq.stderr)) {
+    // SMB writeback can lag the piper exit; give the file one more chance.
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    if (await fileReady(outFile, 1000)) {
+      enq = await run("python3", enqueueArgs, { cwd })
+    }
+  }
   if (enq.code !== 0) {
     const lines = enq.stderr.trim().split("\n").filter(Boolean)
     throw new Error(lines.pop() || `audioq enqueue exited ${enq.code}`)
@@ -1353,6 +1392,7 @@ export default Plugin.define({
             } else {
               const ok = await replayFile(root, args.directory ?? location, args.path)
               setLastAction(root, "replay", ok ? "ok" : "error", path.basename(args.path))
+              logAction(root, "replay", ok ? "ok" : "error", path.basename(args.path))
             }
           }
           return await voiceState(root, args.directory ?? location, args.sessionID, mode)
@@ -1389,16 +1429,16 @@ export default Plugin.define({
           const dir = args.directory ?? location
           if (args.sessionID) {
             setLastAction(root, "repeat", "running", "speaking the previous reply")
+            logAction(root, "repeat", "running")
             try {
               const result = await speakLastReply(ctx, root, dir, args.sessionID)
-              setLastAction(
-                root,
-                "repeat",
-                result ? "ok" : "empty",
-                result ? `${result.seconds ?? "?"}s` : "no text to replay",
-              )
+              const outcome = result ? "ok" : "empty"
+              const detail = result ? `${result.seconds ?? "?"}s` : "no text to replay"
+              setLastAction(root, "repeat", outcome, detail)
+              logAction(root, "repeat", outcome, detail)
             } catch (error) {
               setLastAction(root, "repeat", "error", String(error))
+              logAction(root, "repeat", "error", String(error))
             }
           }
           return await voiceState(root, dir, args.sessionID, mode)
@@ -1408,16 +1448,16 @@ export default Plugin.define({
           const dir = args.directory ?? location
           if (args.sessionID) {
             setLastAction(root, "summary", "running", "summarising")
+            logAction(root, "summary", "running")
             try {
               const result = await speakSummary(ctx, root, dir, args.sessionID)
-              setLastAction(
-                root,
-                "summary",
-                result ? "ok" : "empty",
-                result ? `${result.seconds ?? "?"}s` : "no summary produced",
-              )
+              const outcome = result ? "ok" : "empty"
+              const detail = result ? `${result.seconds ?? "?"}s` : "no summary produced"
+              setLastAction(root, "summary", outcome, detail)
+              logAction(root, "summary", outcome, detail)
             } catch (error) {
               setLastAction(root, "summary", "error", String(error))
+              logAction(root, "summary", "error", String(error))
             }
           }
           return await voiceState(root, dir, args.sessionID, mode)

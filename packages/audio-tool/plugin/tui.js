@@ -601,7 +601,7 @@ var tui_default = Plugin.define({
             aliases: [...VOICE_SLASH.aliases],
             arguments: true
           } : { name: voiceSlashName(spec) },
-          run: (value) => runVoiceCommand(value ?? spec.input)
+          run: (value) => runVoiceCommand(value?.trim() ? value : spec.input)
         }))
       }));
     } catch {

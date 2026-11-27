@@ -222,7 +222,7 @@ export default Plugin.define({
                   arguments: true as const,
                 }
               : { name: voiceSlashName(spec) },
-          run: (value?: string) => runVoiceCommand(value ?? spec.input),
+          run: (value?: string) => runVoiceCommand(value?.trim() ? value : spec.input),
         })),
       }))
     } catch {
