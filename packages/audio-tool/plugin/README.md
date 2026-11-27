@@ -303,9 +303,10 @@ interpolates between the 2 s state polls, so it moves smoothly.
 - **Client with Play on this Mac**: the panel drives the local `afplay` process
   directly, with the same pause and seek semantics (the cached WAV is trimmed
   into a temporary file).
-- **Client without local playback**: actions are forwarded to the host through
-  `.voice-requests` (`kind: "playback"`), and the host publishes the playback
-  position in `.voice-state.json`.
+- **Client without local playback** (or a host whose own queue is idle while the
+  other machine is playing): actions are forwarded to the machine that owns the
+  sound through `.voice-requests` (`kind: "playback"`), and the audible host
+  publishes the playback position in `.voice-state.json`.
 - The machine that owns the speaker must run the current server build; an older
   host has no `.playing.json`, so the panel simply shows no playback row.
 

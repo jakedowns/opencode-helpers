@@ -1663,9 +1663,9 @@ async function voiceState(
   {
     const local = mode === "client" ? localPlaybackInfo() : hostPlayback()
     if (local) result.playback = local
-    else if (mode === "client") {
-      // Another machine is hosting; pick its freshest entry. Our own (possibly
-      // stale, from before a mode switch) entry is ignored.
+    else {
+      // Another machine is hosting (or is the audible source); pick its
+      // freshest entry. Our own stale entry, if any, is ignored.
       const self = hostname()
       const now = Date.now()
       let best: Playback | undefined
@@ -2176,14 +2176,16 @@ export default Plugin.define({
           if (action === "seek" && position === undefined) {
             throw new Error("playback seek needs a position")
           }
-          if (mode === "host") {
+          if (mode === "host" && hostPlayback()) {
             writePlaybackControl(action, position)
             // Give the drainer's 100 ms poll time to apply before reporting.
             await new Promise((resolve) => setTimeout(resolve, 250))
           } else if (mode === "client" && localPlayer) {
             localControl?.(action, position)
           } else {
-            // Client without a local player: the host owns the sound device.
+            // No local player: forward to the machine that owns the sound
+            // (client without local playback, or a host whose queue is idle
+            // while the other machine is playing).
             writeControl(root, { kind: "playback", action, position })
             await new Promise((resolve) => setTimeout(resolve, 300))
           }
