@@ -25,6 +25,12 @@ function readState(root) {
       projects: parsed?.projects && typeof parsed.projects === "object" ? parsed.projects : {},
       sessions: parsed?.sessions && typeof parsed.sessions === "object" ? parsed.sessions : {},
       sidebar: parsed?.sidebar !== false,
+      lastAction: parsed?.lastAction && typeof parsed.lastAction.at === "number" ? {
+        at: parsed.lastAction.at,
+        kind: String(parsed.lastAction.kind ?? ""),
+        status: ["running", "ok", "empty", "error"].includes(parsed.lastAction.status) ? parsed.lastAction.status : "ok",
+        ...typeof parsed.lastAction.detail === "string" && parsed.lastAction.detail ? { detail: parsed.lastAction.detail } : {}
+      } : void 0,
       generating: parsed?.generating && typeof parsed.generating.at === "number" ? { at: parsed.generating.at, count: Number(parsed.generating.count) || 0 } : void 0,
       lastSpeaker: parsed?.lastSpeaker && typeof parsed.lastSpeaker.at === "number" && parsed.lastSpeaker.session ? { at: parsed.lastSpeaker.at, session: String(parsed.lastSpeaker.session) } : void 0,
       queue: parsed?.queue && typeof parsed.queue.at === "number" ? {
@@ -200,6 +206,17 @@ var state = {
         sessions: { type: "object", additionalProperties: true }
       },
       required: ["at", "windowStart", "turns", "spoken", "skipped", "sessions"],
+      additionalProperties: false
+    },
+    lastAction: {
+      type: "object",
+      properties: {
+        at: { type: "number" },
+        kind: { type: "string" },
+        status: { type: "string", enum: ["running", "ok", "empty", "error"] },
+        detail: { type: "string" }
+      },
+      required: ["at", "kind", "status"],
       additionalProperties: false
     },
     lastSpeaker: {
@@ -421,6 +438,9 @@ var VOICE_PALETTE = [
     clients: ["gui", "tui"]
   }
 ];
+function voiceSlashName(spec) {
+  return spec.id === "open" ? VOICE_SLASH.name : `${VOICE_SLASH.name}-${spec.id}`;
+}
 function parseVoiceInput(input) {
   const parts = (input ?? "").trim().split(/\s+/).filter(Boolean);
   return { verb: (parts[0] ?? "").toLowerCase(), arg: parts[1]?.toLowerCase(), parts };
@@ -558,13 +578,11 @@ var tui_default = Plugin.define({
           title: spec.title,
           group: "Voice",
           palette: true,
-          ...spec.id === "open" ? {
-            slash: {
-              name: VOICE_SLASH.name,
-              aliases: [...VOICE_SLASH.aliases],
-              arguments: true
-            }
-          } : {},
+          slash: spec.id === "open" ? {
+            name: VOICE_SLASH.name,
+            aliases: [...VOICE_SLASH.aliases],
+            arguments: true
+          } : { name: voiceSlashName(spec) },
           run: (value) => runVoiceCommand(value ?? spec.input)
         }))
       }));

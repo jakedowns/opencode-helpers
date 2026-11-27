@@ -9,7 +9,7 @@ import { Command, MenuItem, Panel, Plugin, usePlugin } from "@opencode/plugin/gu
 import type { PanelTab } from "@opencode/plugin/gui"
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js"
 import { Voice } from "../rpc.ts"
-import { VOICE_PALETTE, VOICE_SLASH, parseVoiceInput } from "../commands.ts"
+import { VOICE_PALETTE, VOICE_SLASH, parseVoiceInput, voiceSlashName } from "../commands.ts"
 
 type Entry = { path: string; seconds?: number; at: number; session?: string; child?: boolean }
 type Mutes = { session: boolean; project: boolean; global: boolean }
@@ -42,6 +42,7 @@ type State = {
   lastSpeaker?: LastSpeaker
   lastPurge?: Purge
   lastAttempt?: Purge
+  lastAction?: { at: number; kind: string; status: "running" | "ok" | "empty" | "error"; detail?: string }
 }
 
 type Session = { id: string; directory: string }
@@ -341,6 +342,21 @@ function AudioPanel(props: { session: Session }) {
           Purge all
         </button>
       </div>
+      <Show when={state()?.lastAction}>
+        <div style={{ opacity: 0.8 }}>
+          Last: {state()?.lastAction?.kind}{" "}
+          {state()?.lastAction?.status === "ok"
+            ? "✓"
+            : state()?.lastAction?.status === "error"
+              ? "✗"
+              : state()?.lastAction?.status === "empty"
+                ? "—"
+                : "…"}{" "}
+          {state()?.lastAction?.detail ?? ""}
+          {" · "}
+          {Math.max(0, Math.round((Date.now() - (state()?.lastAction?.at ?? Date.now())) / 1000))}s ago
+        </div>
+      </Show>
       <Show when={purgeText()}>
         <div style={{ opacity: 0.7 }}>{purgeText()}</div>
       </Show>
@@ -431,6 +447,7 @@ export default Plugin.define({
       if (!session) return
       if (verb === "status") return openTool()
       if (verb === "repeat" || verb === "last") {
+        openTool()
         void ctx.client
           .rpc(Voice)
           .repeat({ directory: session.directory, sessionID: session.id })
@@ -438,6 +455,7 @@ export default Plugin.define({
         return
       }
       if (verb === "summary" || verb === "summarize") {
+        openTool()
         void ctx.client
           .rpc(Voice)
           .summary({ directory: session.directory, sessionID: session.id })
@@ -491,12 +509,15 @@ export default Plugin.define({
           title: spec.title,
           group: "Voice",
           keywords: spec.keywords,
-          ...(spec.id === "open"
-            ? {
-                slash: { name: VOICE_SLASH.name, aliases: [...VOICE_SLASH.aliases], arguments: true as const },
-                featured: true,
-              }
-            : {}),
+          slash:
+            spec.id === "open"
+              ? {
+                  name: VOICE_SLASH.name,
+                  aliases: [...VOICE_SLASH.aliases],
+                  arguments: true as const,
+                }
+              : { name: voiceSlashName(spec) },
+          ...(spec.id === "open" ? { featured: true } : {}),
           run: (value?: string) => runCommand(value ?? spec.input),
         }),
       )

@@ -22,6 +22,7 @@ export type QueueStats = {
 }
 export type LastSpeaker = { at: number; session: string }
 export type Generating = { at: number; count: number }
+export type LastAction = { at: number; kind: string; status: "running" | "ok" | "empty" | "error"; detail?: string }
 
 export type VoiceSessionStats = {
   turns: number
@@ -67,6 +68,19 @@ export function readState(root: string): VoiceState {
       projects: parsed?.projects && typeof parsed.projects === "object" ? parsed.projects : {},
       sessions: parsed?.sessions && typeof parsed.sessions === "object" ? parsed.sessions : {},
       sidebar: parsed?.sidebar !== false,
+      lastAction:
+        parsed?.lastAction && typeof parsed.lastAction.at === "number"
+          ? {
+              at: parsed.lastAction.at,
+              kind: String(parsed.lastAction.kind ?? ""),
+              status: (["running", "ok", "empty", "error"] as const).includes(parsed.lastAction.status)
+                ? parsed.lastAction.status
+                : "ok",
+              ...(typeof parsed.lastAction.detail === "string" && parsed.lastAction.detail
+                ? { detail: parsed.lastAction.detail }
+                : {}),
+            }
+          : undefined,
       generating:
         parsed?.generating && typeof parsed.generating.at === "number"
           ? { at: parsed.generating.at, count: Number(parsed.generating.count) || 0 }
@@ -278,4 +292,20 @@ export function recordVoiceEvent(
   state.stats = stats
   writeState(root, state)
   return stats
+}
+
+export function setLastAction(
+  root: string,
+  kind: string,
+  status: LastAction["status"],
+  detail?: string,
+): VoiceState {
+  const state = readState(root)
+  state.lastAction = {
+    at: Date.now(),
+    kind,
+    status,
+    ...(detail ? { detail } : {}),
+  }
+  return writeState(root, state)
 }

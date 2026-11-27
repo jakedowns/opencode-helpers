@@ -85,6 +85,17 @@ const state = {
       required: ["at", "windowStart", "turns", "spoken", "skipped", "sessions"],
       additionalProperties: false,
     },
+    lastAction: {
+      type: "object",
+      properties: {
+        at: { type: "number" },
+        kind: { type: "string" },
+        status: { type: "string", enum: ["running", "ok", "empty", "error"] },
+        detail: { type: "string" },
+      },
+      required: ["at", "kind", "status"],
+      additionalProperties: false,
+    },
     lastSpeaker: {
       type: "object",
       properties: {

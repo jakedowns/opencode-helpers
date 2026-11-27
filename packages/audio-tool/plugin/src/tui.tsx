@@ -15,7 +15,7 @@ import { createSignal } from "solid-js"
 import { Plugin } from "@opencode/plugin/tui"
 import { readState, resolveMutes, setMute, setSidebar } from "../state.ts"
 import { Voice } from "../rpc.ts"
-import { VOICE_PALETTE, VOICE_SLASH, parseVoiceInput } from "../commands.ts"
+import { VOICE_PALETTE, VOICE_SLASH, parseVoiceInput, voiceSlashName } from "../commands.ts"
 
 type Scope = "session" | "project" | "global"
 type IndexEntry = { path: string; seconds?: number; at: number; session?: string; child?: boolean }
@@ -214,15 +214,14 @@ export default Plugin.define({
           title: spec.title,
           group: "Voice",
           palette: true,
-          ...(spec.id === "open"
-            ? {
-                slash: {
+          slash:
+            spec.id === "open"
+              ? {
                   name: VOICE_SLASH.name,
                   aliases: [...VOICE_SLASH.aliases],
                   arguments: true as const,
-                },
-              }
-            : {}),
+                }
+              : { name: voiceSlashName(spec) },
           run: (value?: string) => runVoiceCommand(value ?? spec.input),
         })),
       }))

@@ -96,6 +96,11 @@ export const VOICE_PALETTE: VoicePaletteCommand[] = [
   },
 ]
 
+/** Slash name per palette entry: `/voice` for open, `/voice-<id>` otherwise. */
+export function voiceSlashName(spec: VoicePaletteCommand): string {
+  return spec.id === "open" ? VOICE_SLASH.name : `${VOICE_SLASH.name}-${spec.id}`
+}
+
 export function parseVoiceInput(input?: string): { verb: string; arg?: string; parts: string[] } {
   const parts = (input ?? "").trim().split(/\s+/).filter(Boolean)
   return { verb: (parts[0] ?? "").toLowerCase(), arg: parts[1]?.toLowerCase(), parts }

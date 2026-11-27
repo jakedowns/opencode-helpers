@@ -35,6 +35,7 @@ import {
   setPurgeAttempt,
   setQueue,
   setGenerating,
+  setLastAction,
   setSidebar,
   recordVoiceEvent,
   type VoiceStats,
@@ -1025,6 +1026,7 @@ async function voiceState(
     generating: number
     stats?: VoiceStats
     lastSpeaker?: { at: number; session: string }
+    lastAction?: { at: number; kind: string; status: string; detail?: string }
     lastPurge?: { at: number; removed: number; bytes: number }
     lastAttempt?: { at: number; removed: number; bytes: number }
   } = {
@@ -1044,6 +1046,7 @@ async function voiceState(
   }
   if (state.stats) result.stats = state.stats
   if (state.lastSpeaker) result.lastSpeaker = state.lastSpeaker
+  if (state.lastAction) result.lastAction = state.lastAction
   if (state.lastPurge) result.lastPurge = state.lastPurge
   if (state.lastAttempt) result.lastAttempt = state.lastAttempt
   return result
@@ -1343,11 +1346,13 @@ export default Plugin.define({
         replay: async (input: unknown) => {
           const args = (input ?? {}) as { directory?: string; sessionID?: string; path?: string }
           if (args.path) {
+            setLastAction(root, "replay", "running", path.basename(args.path))
             if (mode === "client") {
               writeControl(root, { kind: "replay", path: args.path })
               await new Promise((resolve) => setTimeout(resolve, 1500))
             } else {
-              await replayFile(root, args.directory ?? location, args.path)
+              const ok = await replayFile(root, args.directory ?? location, args.path)
+              setLastAction(root, "replay", ok ? "ok" : "error", path.basename(args.path))
             }
           }
           return await voiceState(root, args.directory ?? location, args.sessionID, mode)
@@ -1382,13 +1387,39 @@ export default Plugin.define({
         repeat: async (input: unknown) => {
           const args = (input ?? {}) as { directory?: string; sessionID?: string }
           const dir = args.directory ?? location
-          if (args.sessionID) await speakLastReply(ctx, root, dir, args.sessionID)
+          if (args.sessionID) {
+            setLastAction(root, "repeat", "running", "speaking the previous reply")
+            try {
+              const result = await speakLastReply(ctx, root, dir, args.sessionID)
+              setLastAction(
+                root,
+                "repeat",
+                result ? "ok" : "empty",
+                result ? `${result.seconds ?? "?"}s` : "no text to replay",
+              )
+            } catch (error) {
+              setLastAction(root, "repeat", "error", String(error))
+            }
+          }
           return await voiceState(root, dir, args.sessionID, mode)
         },
         summary: async (input: unknown) => {
           const args = (input ?? {}) as { directory?: string; sessionID?: string }
           const dir = args.directory ?? location
-          if (args.sessionID) await speakSummary(ctx, root, dir, args.sessionID)
+          if (args.sessionID) {
+            setLastAction(root, "summary", "running", "summarising")
+            try {
+              const result = await speakSummary(ctx, root, dir, args.sessionID)
+              setLastAction(
+                root,
+                "summary",
+                result ? "ok" : "empty",
+                result ? `${result.seconds ?? "?"}s` : "no summary produced",
+              )
+            } catch (error) {
+              setLastAction(root, "summary", "error", String(error))
+            }
+          }
           return await voiceState(root, dir, args.sessionID, mode)
         },
         purge: async (input: unknown) => {
