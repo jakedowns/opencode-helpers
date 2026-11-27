@@ -143,6 +143,38 @@ export function sanitise(input: string): string {
   return kept.join(" ").replace(/\s+/g, " ").trim()
 }
 
+/**
+ * Split long replies at sentence/clause/word boundaries so auto-speak can
+ * queue several files instead of skipping the whole turn. Sanitised text has
+ * no paragraph breaks, so sentence punctuation is the first choice.
+ */
+export function chunkText(input: string, maxChars: number): string[] {
+  const limit = Math.max(200, Math.floor(maxChars) || DEFAULT_MAX_CHARS)
+  const text = input.trim()
+  if (!text) return []
+  if (text.length <= limit) return [text]
+
+  const chunks: string[] = []
+  let remaining = text
+  while (remaining.length > limit) {
+    const window = remaining.slice(0, limit)
+    let cut = -1
+    for (const mark of [". ", "! ", "? ", "; ", ", ", " "]) {
+      const at = window.lastIndexOf(mark)
+      if (at >= limit * 0.5) {
+        cut = at + mark.length
+        break
+      }
+    }
+    if (cut <= 0) cut = limit
+    const piece = remaining.slice(0, cut).trim()
+    if (piece) chunks.push(piece)
+    remaining = remaining.slice(cut).trim()
+  }
+  if (remaining) chunks.push(remaining)
+  return chunks
+}
+
 async function sessionTitle(root: string, sessionID: string | undefined): Promise<string | null> {
   if (!sessionID) return null
   const script = [
@@ -1703,11 +1735,7 @@ export default Plugin.define({
             return
           }
           const cleaned = sanitise(last.text)
-          if (cleaned.length > maxChars) {
-            outcome = "tooLong"
-            log(`skip ${last.id}: ${cleaned.length} chars over ${maxChars}`)
-            return
-          }
+          const chunks = cleaned ? chunkText(cleaned, maxChars) : []
           spoken.add(last.id)
           if (mode === "remote") {
             outcome = "remote"
@@ -1716,14 +1744,27 @@ export default Plugin.define({
           }
           if (mode === "client") {
             const resolved = await sessionTitle(root, event.sessionID)
-            const title = cleaned ? resolved : (resolved ?? "this session")
-            const payload = cleaned || noticeTemplate.replaceAll("{session}", title)
-            const request = writeRequest(root, payload, event.sessionID, resolved, Boolean(meta.parentID))
-            log(`requested ${request.id}${cleaned ? "" : " (untranscribable notice)"}`)
-            outcome = cleaned ? "spoken" : "noText"
+            if (chunks.length === 0) {
+              const title = resolved ?? "this session"
+              const request = writeRequest(
+                root,
+                noticeTemplate.replaceAll("{session}", title),
+                event.sessionID,
+                resolved,
+                Boolean(meta.parentID),
+              )
+              log(`requested ${request.id} (untranscribable notice)`)
+              outcome = "noText"
+              return
+            }
+            for (const chunk of chunks) {
+              writeRequest(root, chunk, event.sessionID, resolved, Boolean(meta.parentID))
+            }
+            log(`requested ${chunks.length} chunk(s) for ${last.id}`)
+            outcome = "spoken"
             return
           }
-          if (!cleaned) {
+          if (chunks.length === 0) {
             const title = (await sessionTitle(root, event.sessionID)) ?? "this session"
             const notice = noticeTemplate.replaceAll("{session}", title)
             log(`nothing speakable in ${last.id}; announcing`)
@@ -1739,15 +1780,23 @@ export default Plugin.define({
             outcome = "noText"
             return
           }
-          const result = await speakDurable(root, location, cleaned, { sessionID: event.sessionID })
-          recordIndex(root, {
-            path: String(result.path),
-            seconds: result.seconds,
-            at: Date.now(),
-            via: result.via,
-            session: result.title ?? undefined,
-            child: Boolean(meta.parentID),
-          })
+          if (chunks.length > 1) {
+            log(`${cleaned.length} chars split into ${chunks.length} chunks for ${last.id}`)
+          }
+          for (const [index, chunk] of chunks.entries()) {
+            const result = await speakDurable(root, location, chunk, {
+              sessionID: event.sessionID,
+              noPreamble: index > 0,
+            })
+            recordIndex(root, {
+              path: String(result.path),
+              seconds: result.seconds,
+              at: Date.now(),
+              via: result.via,
+              session: result.title ?? undefined,
+              child: Boolean(meta.parentID),
+            })
+          }
           outcome = "spoken"
         } catch (error) {
           outcome = "error"

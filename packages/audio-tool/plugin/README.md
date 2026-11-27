@@ -138,7 +138,7 @@ the host.
 |---|---|---|
 | `root` | `/media/share/opencode-audio-tool` | where `audioq.py`, `piper/` and `voices/` live |
 | `auto` | `true` when `.dev/audiomode.jsonc` exists | speak each finished reply |
-| `maxChars` | `2000` | skip replies whose sanitised text is longer |
+| `maxChars` | `2000` | split longer replies into sequential chunks (sentence boundaries first) |
 | `emptyNotice` | `{session} here: my last message was untranscribable, check the app` | spoken when sanitising removes everything |
 | `autoUnmute` | `false` | on host start, unmute the default sink (and lift it off zero) when it would play silently |
 
@@ -148,9 +148,11 @@ the host.
   verbatim, preamble applied by `audioq.py`, synthesised to `output.directory`,
   then enqueued so the returned path survives playback.
 - Auto-speak hook (`experimental.idle`): picks the last assistant message, skips
-  reasoning parts, sanitises markdown, dedupes by message id, caps at
-  `maxChars`, and speaks. When nothing is speakable it announces the session
-  name and says the message was untranscribable instead of going silent. Every
+  reasoning parts, sanitises markdown, dedupes by message id, and speaks.
+  Replies longer than `maxChars` are split into sequential chunks at sentence,
+  clause, or word boundaries instead of being skipped. When nothing is
+  speakable it announces the session name and says the message was
+  untranscribable instead of going silent. Every
   turn is counted in `.voice-state.json` as spoken or skipped (`noText`,
   `tooLong`, `duplicate`, `muted`, `subagent`, `remote`, `error`).
 - `voice_control` (`tools.voice.control`): `mute`, `unmute`, `status` with
