@@ -60,6 +60,46 @@ class PiperDaemon:
             return w.getnframes() / w.getframerate()
 
 
+def _supports_json_input():
+    """True when this piper build has the resident `--json-input` protocol.
+
+    The 2023 Linux build does; the Python `piper` wheel (the working macOS
+    install) does not. Probing once at startup keeps the daemon available on
+    both instead of spawning a piper that exits immediately.
+    """
+    try:
+        proc = subprocess.run(
+            [PIPER, "--help"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, timeout=30)
+    except Exception:
+        return False
+    return proc.returncode == 0 and "--json-input" in (proc.stdout or "")
+
+
+class OneShotPiper:
+    """Same socket protocol, one piper process per request.
+
+    Slower than the resident model (the wheel reloads onnxruntime each time)
+    but it is the only option for builds without `--json-input`.
+    """
+
+    def __init__(self, length_scale="0.67"):
+        self.length_scale = length_scale
+
+    def synth(self, text, out):
+        proc = subprocess.run(
+            [PIPER, "--model", MODEL, "--output_file", out,
+             "--length_scale", self.length_scale],
+            input=text if text.endswith("\n") else text + "\n",
+            text=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            timeout=120)
+        if proc.returncode != 0 or not os.path.isfile(out) or os.path.getsize(out) == 0:
+            tail = (proc.stderr or "").strip().splitlines()
+            raise RuntimeError(tail[-1] if tail else f"piper exited {proc.returncode}")
+        with wave.open(out) as w:
+            return w.getnframes() / w.getframerate()
+
+
 def serve(daemon, sock=SOCK):
     parent = os.path.dirname(sock)
     if parent:
@@ -115,7 +155,7 @@ def main(argv=None):
     wants_drain = args.drain or args.once or args.dry_run
 
     if args.serve:
-        daemon = PiperDaemon()
+        daemon = PiperDaemon() if _supports_json_input() else OneShotPiper()
         if wants_drain:
             from audioq import drain, resolve_queue_dir
             threading.Thread(

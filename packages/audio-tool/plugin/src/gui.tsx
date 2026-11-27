@@ -32,6 +32,9 @@ type State = {
   mutes: Mutes
   sidebar: boolean
   mode?: "host" | "client" | "remote"
+  modeSource?: "option" | "override" | "auto"
+  modeOverride?: { at: number; mode: "auto" | "host" | "client" }
+  canHost?: boolean
   source?: "local" | "host"
   statsAgeMs?: number
   cache?: Cache
@@ -44,6 +47,8 @@ type State = {
   lastAttempt?: Purge
   lastAction?: { at: number; kind: string; status: "running" | "ok" | "empty" | "error"; detail?: string }
   clientPlayback?: { at: number; enabled: boolean }
+  hostHeartbeat?: { machine: string; at: number }
+  otherHost?: { machine: string; at: number }
   log?: Array<{ at: string; kind: string; status: string; detail?: string }>
 }
 
@@ -83,11 +88,21 @@ function AudioPanel(props: { session: Session }) {
   const ctx = usePlugin()
   const [state, setState] = createSignal<State | undefined>()
 
+  // An in-flight poll can resolve after a mutation and revert it. Accept a
+  // response only if its clientPlayback timestamp is not older than what we
+  // already show; a response without the flag counts as older.
+  const applyState = (next: State) => {
+    const incoming = next?.clientPlayback?.at ?? 0
+    const current = state()?.clientPlayback?.at ?? 0
+    if (incoming < current) return
+    setState(next)
+  }
+
   const refresh = () =>
     ctx.client
       .rpc(Voice)
       .state({ directory: props.session.directory, sessionID: props.session.id })
-      .then((next: unknown) => setState(next as State))
+      .then((next: unknown) => applyState(next as State))
       .catch((error) => fail("refresh", error))
 
   onMount(() => {
@@ -100,14 +115,14 @@ function AudioPanel(props: { session: Session }) {
     ctx.client
       .rpc(Voice)
       .replay({ directory: props.session.directory, sessionID: props.session.id, path: file })
-      .then((next: unknown) => setState(next as State))
+      .then((next: unknown) => applyState(next as State))
       .catch((error) => fail("replay", error))
 
   const remove = (file: string) =>
     ctx.client
       .rpc(Voice)
       .remove({ directory: props.session.directory, sessionID: props.session.id, path: file })
-      .then((next: unknown) => setState(next as State))
+      .then((next: unknown) => applyState(next as State))
       .catch((error) => fail("delete", error))
 
   const purge = (days?: number) =>
@@ -118,14 +133,14 @@ function AudioPanel(props: { session: Session }) {
         sessionID: props.session.id,
         ...(typeof days === "number" ? { days } : {}),
       })
-      .then((next: unknown) => setState(next as State))
+      .then((next: unknown) => applyState(next as State))
       .catch((error) => fail("mute", error))
 
   const setVolume = (value: number) =>
     ctx.client
       .rpc(Voice)
       .setVolume({ directory: props.session.directory, sessionID: props.session.id, value })
-      .then((next: unknown) => setState(next as State))
+      .then((next: unknown) => applyState(next as State))
       .catch((error) => fail("purge", error))
 
   const toggle = (scope: "session" | "project" | "global") => {
@@ -139,7 +154,7 @@ function AudioPanel(props: { session: Session }) {
         scope,
         value: !value,
       })
-      .then((next: unknown) => setState(next as State))
+      .then((next: unknown) => applyState(next as State))
       .catch(() => {})
   }
 

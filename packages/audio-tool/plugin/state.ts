@@ -24,6 +24,9 @@ export type LastSpeaker = { at: number; session: string }
 export type Generating = { at: number; count: number }
 export type ClientPlayback = { at: number; enabled: boolean }
 export type LastAction = { at: number; kind: string; status: "running" | "ok" | "empty" | "error"; detail?: string }
+export type HostHeartbeat = { machine: string; at: number }
+export type Mode = "auto" | "host" | "client"
+export type ModeOverride = { at: number; mode: Mode }
 
 export type VoiceSessionStats = {
   turns: number
@@ -53,6 +56,8 @@ export type VoiceState = {
   lastSpeaker?: LastSpeaker
   generating?: Generating
   stats?: VoiceStats
+  hostHeartbeat?: HostHeartbeat
+  hosts?: Record<string, number>
 }
 
 const EMPTY: VoiceState = { global: false, projects: {}, sessions: {}, sidebar: true }
@@ -151,6 +156,20 @@ export function readState(root: string): VoiceState {
                   ? parsed.stats.sessions
                   : {},
             }
+          : undefined,
+      hostHeartbeat:
+        parsed?.hostHeartbeat &&
+        typeof parsed.hostHeartbeat.at === "number" &&
+        typeof parsed.hostHeartbeat.machine === "string"
+          ? { machine: String(parsed.hostHeartbeat.machine), at: Number(parsed.hostHeartbeat.at) }
+          : undefined,
+      hosts:
+        parsed?.hosts && typeof parsed.hosts === "object" && !Array.isArray(parsed.hosts)
+          ? Object.fromEntries(
+              Object.entries(parsed.hosts)
+                .filter(([, at]) => typeof at === "number" && Number.isFinite(at))
+                .map(([machine, at]) => [machine, Number(at)]),
+            )
           : undefined,
     }
   } catch {
@@ -348,4 +367,64 @@ export function writeClientPlayback(root: string, enabled: boolean): ClientPlayb
     }
   }
   return value
+}
+
+/** Per-machine mode override: its own file, so host stat writes cannot clobber it. */
+export function modeOverridePath(root: string): string {
+  return path.join(root, ".mode-override.json")
+}
+
+export function readModeOverride(root: string): ModeOverride {
+  try {
+    const raw = JSON.parse(readFileSync(modeOverridePath(root), "utf8")) as {
+      at?: number
+      mode?: string
+    }
+    const mode = raw.mode === "host" || raw.mode === "client" ? raw.mode : "auto"
+    return { at: Number(raw.at) || 0, mode }
+  } catch {
+    return { at: 0, mode: "auto" }
+  }
+}
+
+export function writeModeOverride(root: string, mode: Mode): ModeOverride {
+  const value: ModeOverride = { at: Date.now(), mode }
+  const file = modeOverridePath(root)
+  const tmp = `${file}.${process.pid}-${Date.now().toString(36)}.part`
+  try {
+    writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`)
+    renameSync(tmp, file)
+  } catch {
+    try {
+      writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`)
+    } catch {
+      /* ignore */
+    }
+    try {
+      unlinkSync(tmp)
+    } catch {
+      /* ignore */
+    }
+  }
+  return value
+}
+
+const HEARTBEAT_KEEP_MS = 5 * 60_000
+
+/**
+ * Mark this machine as an active host. The single `hostHeartbeat` field is the
+ * most recent host; `hosts` keeps one timestamp per machine so a panel can see
+ * a *different* host that is still ticking (two hosts must not both play).
+ */
+export function setHostHeartbeat(root: string, machine: string): VoiceState {
+  const state = readState(root)
+  const now = Date.now()
+  state.hostHeartbeat = { machine, at: now }
+  const hosts: Record<string, number> = { ...(state.hosts ?? {}) }
+  hosts[machine] = now
+  for (const [name, at] of Object.entries(hosts)) {
+    if (now - at > HEARTBEAT_KEEP_MS) delete hosts[name]
+  }
+  state.hosts = hosts
+  return writeState(root, state)
 }

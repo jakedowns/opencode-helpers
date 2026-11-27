@@ -36,13 +36,15 @@ import time
 import wave
 
 ROOT = "/media/share/linux-piper-helper"
-PIPER = os.path.join(ROOT, "piper", "piper")
-MODEL = os.path.join(ROOT, "voices", "voice.onnx")
+# A clone elsewhere (or a Mac with the pip piper) exports these rather than
+# editing the fallback path.
+PIPER = os.environ.get("PIPER_BIN") or os.path.join(ROOT, "piper", "piper")
+MODEL = os.environ.get("PIPER_MODEL") or os.path.join(ROOT, "voices", "voice.onnx")
 LENGTH_SCALE = "0.67"
 
 DEFAULT_QUEUE_DIR = "/tmp/opencode/audio-replies/queue"
 DEFAULT_SOCK = "/tmp/opencode/audio-replies/piperd.sock"
-DEFAULT_PLAYER = "aplay -q"
+DEFAULT_PLAYER = "afplay" if sys.platform == "darwin" else "aplay -q"
 
 POLL_SECONDS = 0.25
 MAX_PLAYED = 100

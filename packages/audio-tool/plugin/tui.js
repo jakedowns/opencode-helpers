@@ -68,7 +68,11 @@ function readState(root) {
         spoken: Number(parsed.stats.spoken) || 0,
         skipped: parsed.stats.skipped && typeof parsed.stats.skipped === "object" ? parsed.stats.skipped : {},
         sessions: parsed.stats.sessions && typeof parsed.stats.sessions === "object" ? parsed.stats.sessions : {}
-      } : void 0
+      } : void 0,
+      hostHeartbeat: parsed?.hostHeartbeat && typeof parsed.hostHeartbeat.at === "number" && typeof parsed.hostHeartbeat.machine === "string" ? { machine: String(parsed.hostHeartbeat.machine), at: Number(parsed.hostHeartbeat.at) } : void 0,
+      hosts: parsed?.hosts && typeof parsed.hosts === "object" && !Array.isArray(parsed.hosts) ? Object.fromEntries(
+        Object.entries(parsed.hosts).filter(([, at]) => typeof at === "number" && Number.isFinite(at)).map(([machine, at]) => [machine, Number(at)])
+      ) : void 0
     };
   } catch {
     return EMPTY;
@@ -116,6 +120,7 @@ function setSidebar(root, visible) {
   return writeState(root, state2);
 }
 var STATS_WINDOW_MS = 24 * 60 * 60 * 1e3;
+var HEARTBEAT_KEEP_MS = 5 * 6e4;
 
 // node_modules/@opencode/schema/dist/rpc.js
 var rpc_exports = {};
@@ -160,6 +165,35 @@ var state = {
     mutes,
     sidebar: { type: "boolean" },
     mode: { type: "string", enum: ["host", "client", "remote"] },
+    modeSource: { type: "string", enum: ["option", "override", "auto"] },
+    modeOverride: {
+      type: "object",
+      properties: {
+        at: { type: "number" },
+        mode: { type: "string", enum: ["auto", "host", "client"] }
+      },
+      required: ["at", "mode"],
+      additionalProperties: false
+    },
+    canHost: { type: "boolean" },
+    hostHeartbeat: {
+      type: "object",
+      properties: {
+        machine: { type: "string" },
+        at: { type: "number" }
+      },
+      required: ["machine", "at"],
+      additionalProperties: false
+    },
+    otherHost: {
+      type: "object",
+      properties: {
+        machine: { type: "string" },
+        at: { type: "number" }
+      },
+      required: ["machine", "at"],
+      additionalProperties: false
+    },
     source: { type: "string", enum: ["local", "host"] },
     statsAgeMs: { type: "number" },
     generating: { type: "number" },

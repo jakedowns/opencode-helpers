@@ -9,7 +9,7 @@
  * every failure is logged and returned as tool content.
  */
 import { spawn } from "node:child_process"
-import { homedir } from "node:os"
+import { homedir, hostname } from "node:os"
 import {
   accessSync,
   closeSync,
@@ -19,6 +19,7 @@ import {
   openSync,
   readFileSync,
   readdirSync,
+  readSync,
   renameSync,
   statSync,
   unlinkSync,
@@ -35,6 +36,9 @@ import {
   setCache,
   readClientPlayback,
   writeClientPlayback,
+  readModeOverride,
+  writeModeOverride,
+  setHostHeartbeat,
   setMute,
   setPurgeAttempt,
   setQueue,
@@ -42,6 +46,7 @@ import {
   setLastAction,
   setSidebar,
   recordVoiceEvent,
+  type ModeOverride,
   type VoiceStats,
 } from "./state.ts"
 import { Voice } from "./rpc.ts"
@@ -56,6 +61,7 @@ type Options = {
   sharedRoot?: string
   cacheDir?: string
   player?: string
+  piperBin?: string
   root?: string
   auto?: boolean
   maxChars?: number
@@ -65,22 +71,128 @@ type Options = {
 const DEFAULT_ROOT = "/media/share/opencode-audio-tool"
 const DEFAULT_NOTICE = "{session} here: my last message was untranscribable, check the app"
 const DEFAULT_MAX_CHARS = 2000
+const DEFAULT_AUDIO_ROOT = "/media/share/tmp/audio"
+const DEFAULT_QUEUE = "/tmp/opencode/audio-replies/queue"
+const DEFAULT_SOCK = "/tmp/opencode/audio-replies/piperd.sock"
 
 /**
- * `auto` decides from the machine: only a Linux box with an executable piper
- * binary is a host. macOS (and any box without piper) is a client that reads
- * the shared host stats.
+ * Per-process copy of the plugin options. Mode is a runtime value now, so the
+ * speak/replay/state helpers need to see the options without threading them
+ * through every call. One plugin instance per process is the normal case.
  */
-function resolveMode(requested: Mode, root: string): ResolvedMode {
-  if (requested !== "auto") return requested
-  if (process.platform !== "linux") return "client"
-  const piper = path.join(root, "piper", "piper")
+let hostOptions: Options = {}
+let hostRoot = DEFAULT_ROOT
+let activeMode: ResolvedMode = "client"
+let modeOrigin: "option" | "override" | "auto" = "auto"
+let hostCapable = false
+let queueDirPath = DEFAULT_QUEUE
+let socketPath = DEFAULT_SOCK
+let audioRootDir = DEFAULT_AUDIO_ROOT
+
+function isExecutable(file: string): boolean {
   try {
-    accessSync(piper, fsConstants.X_OK)
-    return "host"
+    accessSync(file, fsConstants.X_OK)
+    return statSync(file).isFile()
   } catch {
-    return "client"
+    return false
   }
+}
+
+/**
+ * Is this file an executable for the current OS? A Mach-O magic check is
+ * enough to reject `piper/piper` (the Linux copy) on macOS without running it;
+ * a shebang counts too, because the pip fallback is a launcher script.
+ */
+function executableForThisOs(file: string): boolean {
+  try {
+    accessSync(file, fsConstants.X_OK)
+    if (!statSync(file).isFile()) return false
+  } catch {
+    return false
+  }
+  let header: Buffer
+  try {
+    const fd = openSync(file, "r")
+    header = Buffer.alloc(8)
+    readSync(fd, header, 0, 8, 0)
+    closeSync(fd)
+  } catch {
+    return true // unreadable but executable: let the OS decide
+  }
+  const be = header.readUInt32BE(0)
+  const macho = be === 0xcffaedfe || be === 0xfeedfacf || be === 0xfeedface || be === 0xcafebabe || be === 0xbebafeca
+  const elf = be === 0x7f454c46
+  const script = header[0] === 0x23 && header[1] === 0x21
+  if (script) return true
+  if (process.platform === "darwin") return macho
+  if (process.platform === "linux") return elf
+  return true
+}
+
+/**
+ * Piper resolution: an explicit option, `PIPER_BIN`, or the reply config wins
+ * (trust the user); otherwise prefer the macOS build on macOS, then the shared
+ * Linux copy. The Linux binary is not accepted on macOS even when it has the
+ * executable bit, because it fails later with a confusing dyld/exec error.
+ */
+function piperBinary(opts: Options, root: string, config?: ReplyConfig): string | null {
+  const explicit = [
+    opts.piperBin,
+    process.env.PIPER_BIN,
+    config?.synthesis?.piper_bin,
+    config?.synthesis?.piperBin,
+  ].filter((value): value is string => typeof value === "string" && value.length > 0)
+  for (const candidate of explicit) {
+    if (isExecutable(candidate)) return candidate
+  }
+  const defaults =
+    process.platform === "darwin"
+      ? [path.join(root, "piper-macos", "piper"), path.join(root, "piper", "piper")]
+      : [path.join(root, "piper", "piper")]
+  for (const candidate of defaults) {
+    if (executableForThisOs(candidate)) return candidate
+  }
+  return null
+}
+
+/** Player command for this machine: afplay on macOS, aplay elsewhere. */
+function playerFor(opts: Options): string {
+  return opts.player || process.env.AUDIOQ_PLAYER || (process.platform === "darwin" ? "afplay" : "aplay -q")
+}
+
+function playerArgv(player: string): string[] {
+  const parts = player.split(/\s+/).filter(Boolean)
+  return parts.length > 0 ? parts : ["aplay", "-q"]
+}
+
+/** Cache/purge root: a real local path, not the VM-only /media/share path. */
+function audioRoot(opts: Options): string {
+  if (opts.sharedRoot) return path.join(opts.sharedRoot, "tmp", "audio")
+  return DEFAULT_AUDIO_ROOT
+}
+
+/** ffmpeg: config, then FFMPEG, then the historical shared path, then PATH. */
+function ffmpegFor(config: ReplyConfig): string {
+  const configured = config.output?.ffmpeg || process.env.FFMPEG
+  if (configured) return configured
+  const legacy = "/media/share/tmp/tools/ffmpeg/ffmpeg"
+  return existsSync(legacy) ? legacy : "ffmpeg"
+}
+
+/**
+ * `auto` decides from the machine: a Linux box with the shared piper, or a Mac
+ * with the macOS build (option, `PIPER_BIN`, `piper-macos/piper`). Anything
+ * else is a client that reads the shared host stats.
+ */
+function resolveMode(
+  requested: Mode,
+  root: string,
+  opts: Options = hostOptions,
+  config?: ReplyConfig,
+): ResolvedMode {
+  if (requested !== "auto") return requested
+  if (process.platform !== "linux" && process.platform !== "darwin") return "client"
+  return piperBinary(opts, root, config) ? "host" : "client"
 }
 
 function log(message: string, detail?: unknown) {
@@ -231,6 +343,9 @@ type ReplyConfig = {
     length_scale?: number
     voice_per_session?: boolean
     voices?: string[]
+    /** Piper binary for this machine; snake_case is the committed form. */
+    piper_bin?: string
+    piperBin?: string
   }
 }
 
@@ -353,10 +468,26 @@ function mapSharedPath(root: string, configured: string | undefined, target: str
   return path.join(localRoot, target.slice(base.length + 1))
 }
 
+/**
+ * The path actually usable on this machine. Index entries keep the canonical
+ * /media/share form so every machine can read them; writes and deletes resolve
+ * that through `sharedRoot` first.
+ */
+function localPath(root: string, target: string): string {
+  const mapped = mapSharedPath(root, hostOptions.sharedRoot, target)
+  if (mapped) return mapped
+  return target
+}
+
+/** Write target for output.directory: map the share path even before it exists. */
+function localOutputDir(root: string, configured: string): string {
+  return mapSharedPath(root, hostOptions.sharedRoot, configured) ?? configured
+}
+
 /** Client mode: copy new replies into a local cache and play them with afplay. */
 function startClientPlayback(ctx: any, root: string, opts: Options): () => void {
   const cacheDir = opts.cacheDir || path.join(homedir(), ".cache", "opencode-audio-tool")
-  const player = opts.player || (process.platform === "darwin" ? "afplay" : "aplay")
+  const player = playerArgv(playerFor(opts))
   const key = "voiceClientLastAt"
   let busy = false
   const timer = setInterval(() => {
@@ -377,7 +508,7 @@ function startClientPlayback(ctx: any, root: string, opts: Options): () => void 
           mkdirSync(cacheDir, { recursive: true })
           const dest = path.join(cacheDir, path.basename(local))
           if (!existsSync(dest)) copyFileSync(local, dest)
-          const child = spawn(player, [dest], { detached: true, stdio: "ignore" })
+          const child = spawn(player[0], [...player.slice(1), dest], { detached: true, stdio: "ignore" })
           child.on("error", (error) => logAction(root, "play", "error", String(error)))
           child.unref()
           logAction(root, "play", "ok", path.basename(dest))
@@ -454,7 +585,7 @@ async function purgeGenerated(
 ): Promise<{ removed: number; bytes: number; freed: string }> {
   const config = await readConfig(root, cwd)
   const retention = retentionFor(config)
-  const projectDir = config.output?.directory || DEFAULT_OUTPUT_DIR
+  const projectDir = localOutputDir(root, config.output?.directory || DEFAULT_OUTPUT_DIR)
   const maxAgeMs =
     typeof days === "number"
       ? days <= 0
@@ -464,11 +595,11 @@ async function purgeGenerated(
         ? Math.min(retention.autoMinutes * 60_000, retention.days * 86_400_000)
         : retention.days * 86_400_000
 
-  const dirs = options.all ? [AUDIO_ROOT] : [projectDir]
+  const dirs = options.all ? [audioRootDir] : [projectDir]
   if (options.all) {
     try {
-      for (const entry of readdirSync(AUDIO_ROOT, { withFileTypes: true })) {
-        if (entry.isDirectory()) dirs.push(path.join(AUDIO_ROOT, entry.name))
+      for (const entry of readdirSync(audioRootDir, { withFileTypes: true })) {
+        if (entry.isDirectory()) dirs.push(path.join(audioRootDir, entry.name))
       }
     } catch {
       /* root missing */
@@ -692,7 +823,7 @@ async function speakSummary(
 }
 
 function queueDirectory(): string {
-  return process.env.AUDIOQ_DIR || "/tmp/opencode/audio-replies/queue"
+  return queueDirPath
 }
 
 /** The queue's played archive keeps WAVs; reuse one when the basename matches. */
@@ -717,9 +848,9 @@ function findPlayedWav(file: string): string | null {
 /** Re-enqueue an existing reply. WAVs go straight in; encoded links reuse the
  * queue's played WAV when it is still archived, and only transcode otherwise. */
 async function replayFile(root: string, cwd: string, target: string): Promise<boolean> {
-  const file = path.resolve(target)
+  const file = path.resolve(localPath(root, target))
   if (!existsSync(file)) return false
-  const entry = readIndex(root, 500).find((item) => path.resolve(item.path) === file)
+  const entry = readIndex(root, 500).find((item) => path.resolve(item.path) === path.resolve(target))
   let wav = file
   let tmp: string | undefined
   if (!/\.wav$/i.test(file)) {
@@ -728,7 +859,7 @@ async function replayFile(root: string, cwd: string, target: string): Promise<bo
       wav = archived
     } else {
       const config = await readConfig(root, cwd)
-      const ffmpeg = config.output?.ffmpeg || process.env.FFMPEG || "/media/share/tmp/tools/ffmpeg/ffmpeg"
+      const ffmpeg = ffmpegFor(config)
       tmp = path.join("/tmp/opencode/audio-replies", `replay-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}.wav`)
       const convert = await run(ffmpeg, ["-y", "-hide_banner", "-loglevel", "error", "-i", file, "-acodec", "pcm_s16le", tmp], {
         cwd,
@@ -772,8 +903,9 @@ function removeEntry(root: string, target: string): boolean {
   const file = path.resolve(target)
   const entries = readIndex(root, 500)
   if (!entries.some((entry) => path.resolve(entry.path) === file)) return false
-  const base = file.replace(/\.(wav|mp3|m4a)$/i, "")
-  for (const candidate of new Set([`${base}.wav`, `${base}.mp3`, file])) {
+  const local = path.resolve(localPath(root, target))
+  const base = local.replace(/\.(wav|mp3|m4a)$/i, "")
+  for (const candidate of new Set([`${base}.wav`, `${base}.mp3`, `${base}.m4a`, local])) {
     try {
       unlinkSync(candidate)
     } catch {
@@ -808,16 +940,28 @@ async function speakDurableInner(
   }
 
   const config = await readConfig(root, cwd)
-  const outputDir = config.output?.directory || "/media/share/tmp/audio/opencode-audio-tool"
+  const configuredDir = config.output?.directory || DEFAULT_OUTPUT_DIR
+  // The config speaks the canonical /media/share form; on a Mac with a share
+  // mounted elsewhere `sharedRoot` resolves where the bytes actually go. The
+  // index keeps the canonical path so other machines can map it too.
+  const outputDir = localOutputDir(root, configuredDir)
   const model = voiceModel(config, root, opts.sessionID, opts.voice)
   const lengthScale = config.synthesis?.length_scale ?? 0.67
+  const piper = piperBinary(hostOptions, root, config)
+  if (!piper) {
+    throw new Error(
+      `no piper binary for ${process.platform} (run ./fetch-macos.sh on macOS, or set the piperBin option)`,
+    )
+  }
 
   mkdirSync(outputDir, { recursive: true })
-  const outFile = path.join(outputDir, `reply-${slug(text)}-${Date.now().toString(36).slice(-4)}.wav`)
+  const name = `reply-${slug(text)}-${Date.now().toString(36).slice(-4)}.wav`
+  const outFile = path.join(outputDir, name)
+  const linkWav = path.join(configuredDir, name)
 
   const started = Date.now()
   const synth = await run(
-    path.join(root, "piper", "piper"),
+    piper,
     ["--model", model, "--output_file", outFile, "--length_scale", String(lengthScale)],
     { cwd, input: `${spoken}\n`, timeoutMs: 180_000 },
   )
@@ -831,7 +975,9 @@ async function speakDurableInner(
   }
   const gen = (Date.now() - started) / 1000
 
-  const clientPlays = readClientPlayback(root).enabled
+  // Local playback-on-this-Mac only suppresses enqueue when this machine is a
+  // client; a host always feeds its own queue, whatever the (shared) flag says.
+  const clientPlays = activeMode === "client" && readClientPlayback(root).enabled
   const audioSeconds = wavDuration(outFile)
   const enqueueArgs = [path.join(root, "audioq.py"), "enqueue", outFile, "--text", spoken]
   if (resolvedTitle) enqueueArgs.push("--session", resolvedTitle)
@@ -857,12 +1003,11 @@ async function speakDurableInner(
     throw new Error(`audioq enqueue returned no JSON: ${line.slice(0, 200)}`)
   }
   const format = effectiveFormat(config)
-  let linkFile = outFile
+  let linkFile = linkWav
   let via = "piper+enqueue"
   if (format !== "wav") {
     const encoded = outFile.replace(/\.wav$/, format === "m4a" ? ".m4a" : ".mp3")
-    const ffmpeg =
-      config.output?.ffmpeg || process.env.FFMPEG || "/media/share/tmp/tools/ffmpeg/ffmpeg"
+    const ffmpeg = ffmpegFor(config)
     const bitrate =
       config.output?.link_bitrate || (format === "m4a" ? "96k" : config.output?.mp3_bitrate || "128k")
     const codec = format === "m4a"
@@ -874,7 +1019,7 @@ async function speakDurableInner(
       { cwd, timeoutMs: 60_000 },
     )
     if (convert.code === 0 && existsSync(encoded) && statSync(encoded).size > 0) {
-      linkFile = encoded
+      linkFile = path.join(configuredDir, path.basename(encoded))
       via = `piper+${format}+enqueue`
       try {
         unlinkSync(outFile) // the queue holds its own link or copy
@@ -986,7 +1131,7 @@ async function waitFor(predicate: () => boolean, ms: number): Promise<boolean> {
  * after its owner is confirmed dead. Retries follow a 1 s / 5 s / 30 s backoff
  * without blocking setup; one-shot synthesis covers the gap.
  */
-function ensureDaemon(root: string, queueDir: string, sock: string): void {
+function ensureDaemon(root: string, queueDir: string, sock: string, env: NodeJS.ProcessEnv): void {
   void (async () => {
     if (existsSync(sock)) return
     mkdirSync(queueDir, { recursive: true })
@@ -1015,6 +1160,7 @@ function ensureDaemon(root: string, queueDir: string, sock: string): void {
         cwd: root,
         detached: true,
         stdio: "ignore",
+        env,
       })
       child.on("error", () => {})
       child.unref()
@@ -1091,7 +1237,7 @@ function playingSession(queueDir: string): string | null {
 }
 
 function queueCounts(): { queued: number; playing: number; failed: number; playingSession?: string } {
-  const dir = process.env.AUDIOQ_DIR || "/tmp/opencode/audio-replies/queue"
+  const dir = queueDirPath
   const count = (sub: string): number => {
     try {
       return readdirSync(sub ? path.join(dir, sub) : dir).filter((name) => name.endsWith(".wav")).length
@@ -1109,18 +1255,18 @@ function queueCounts(): { queued: number; playing: number; failed: number; playi
   return result
 }
 
-const AUDIO_ROOT = "/media/share/tmp/audio"
-
 /**
  * One canonical number: every project writes its replies somewhere under the
  * shared audio root, so summing that tree gives the same answer from any host,
- * instead of oscillating with whichever project asked last.
+ * instead of oscillating with whichever project asked last. `audioRootDir` is
+ * machine-local: `<sharedRoot>/tmp/audio` on a Mac, the /media/share path on
+ * the VM.
  */
 function cacheUsage(_dir?: string): { files: number; bytes: number } {
-  const roots = [AUDIO_ROOT]
+  const roots = [audioRootDir]
   try {
-    for (const entry of readdirSync(AUDIO_ROOT, { withFileTypes: true })) {
-      if (entry.isDirectory()) roots.push(path.join(AUDIO_ROOT, entry.name))
+    for (const entry of readdirSync(audioRootDir, { withFileTypes: true })) {
+      if (entry.isDirectory()) roots.push(path.join(audioRootDir, entry.name))
     }
   } catch {
     /* root missing */
@@ -1151,7 +1297,7 @@ async function voiceState(
   root: string,
   directory: string,
   sessionID?: string,
-  mode: ResolvedMode = "host",
+  mode: ResolvedMode = activeMode,
 ) {
   const state = readState(root)
   let cache: { at: number; files: number; bytes: number }
@@ -1194,6 +1340,9 @@ async function voiceState(
     mutes: ReturnType<typeof resolveMutes>
     sidebar: boolean
     mode: ResolvedMode
+    modeSource: "option" | "override" | "auto"
+    modeOverride: ModeOverride
+    canHost: boolean
     source: "local" | "host"
     statsAgeMs: number
     cache: { files: number; bytes: number }
@@ -1207,11 +1356,16 @@ async function voiceState(
     clientPlayback?: { at: number; enabled: boolean }
     lastPurge?: { at: number; removed: number; bytes: number }
     lastAttempt?: { at: number; removed: number; bytes: number }
+    hostHeartbeat?: { machine: string; at: number }
+    otherHost?: { machine: string; at: number }
   } = {
     entries,
     mutes: resolveMutes(state, directory, sessionID),
     sidebar: state.sidebar,
     mode,
+    modeSource: modeOrigin,
+    modeOverride: readModeOverride(root),
+    canHost: piperBinary(hostOptions, root) !== null,
     source: mode === "client" ? "host" : "local",
     statsAgeMs: Math.max(
       0,
@@ -1232,6 +1386,17 @@ async function voiceState(
   if (state.lastAction) result.lastAction = state.lastAction
   if (state.lastPurge) result.lastPurge = state.lastPurge
   if (state.lastAttempt) result.lastAttempt = state.lastAttempt
+  if (state.hostHeartbeat) result.hostHeartbeat = state.hostHeartbeat
+  {
+    const self = hostname()
+    const now = Date.now()
+    let other: { machine: string; at: number } | undefined
+    for (const [machine, at] of Object.entries(state.hosts ?? {})) {
+      if (machine === self || now - at > 15_000) continue
+      if (!other || at > other.at) other = { machine, at }
+    }
+    if (other) result.otherHost = other
+  }
   return result
 }
 
@@ -1401,11 +1566,15 @@ export default Plugin.define({
     const options = (ctx.options ?? {}) as Options
     const root = options.root ?? DEFAULT_ROOT
     const location = ctx.location?.directory ?? process.cwd()
+    hostOptions = options
+    hostRoot = root
+    queueDirPath = process.env.AUDIOQ_DIR || DEFAULT_QUEUE
+    socketPath = process.env.AUDIOQ_SOCK || DEFAULT_SOCK
+    audioRootDir = audioRoot(options)
     const startupConfig = await readConfig(root, location)
     const speakSubagents =
       options.speakSubagents ?? startupConfig.playback?.speak_subagents ?? false
     const requestedMode: Mode = options.mode ?? "auto"
-    const mode: ResolvedMode = resolveMode(requestedMode, root)
     const maxChars = typeof options.maxChars === "number" ? options.maxChars : DEFAULT_MAX_CHARS
     const noticeTemplate = options.emptyNotice ?? DEFAULT_NOTICE
     const hasConfig = existsSync(path.join(location, ".dev", "audiomode.jsonc"))
@@ -1413,39 +1582,56 @@ export default Plugin.define({
     // an absent option still follows the per-project opt-in.
     const auto = options.auto === true || (options.auto !== false && hasConfig)
     const spoken = new Set<string>()
-    const queueDir = process.env.AUDIOQ_DIR || "/tmp/opencode/audio-replies/queue"
-    const sock = process.env.AUDIOQ_SOCK || "/tmp/opencode/audio-replies/piperd.sock"
-    log(`mode ${mode} (requested ${requestedMode}, platform ${process.platform})`)
 
-    const cleanups: Array<() => void> = []
-    if (mode === "client") {
-      cleanups.push(startClientPlayback(ctx, root, options))
+    const daemonEnv = (): NodeJS.ProcessEnv => {
+      const piper = piperBinary(options, root, startupConfig)
+      const model = startupConfig.synthesis?.model
+        ? startupConfig.synthesis.model.includes("/")
+          ? startupConfig.synthesis.model
+          : path.join(root, "voices", startupConfig.synthesis.model)
+        : path.join(root, "voices", "voice.onnx")
+      const env: NodeJS.ProcessEnv = {
+        ...process.env,
+        PIPER_MODEL: model,
+        AUDIOQ_PLAYER: playerFor(options),
+        AUDIOQ_DIR: queueDirPath,
+        AUDIOQ_SOCK: socketPath,
+      }
+      if (piper) env.PIPER_BIN = piper
+      return env
     }
-    if (mode === "host") {
-      cleanups.push(startRequestWatcher(root, location))
+
+    /**
+     * Everything that only a host needs. Kept in one function so the runtime
+     * switch can stop it cleanly and start the client pieces instead.
+     */
+    const startHostPieces = (): (() => void) => {
+      const stops: Array<() => void> = []
+      stops.push(startRequestWatcher(root, location))
       log("host mode: watching .voice-requests")
 
-      const status = await audioStatus()
-      setAudio(root, status)
-      setQueue(root, queueCounts())
-      if (status.muted || status.volume === 0) {
-        if (options.autoUnmute === true) {
-          await run("wpctl", ["set-mute", "@DEFAULT_AUDIO_SINK@", "0"], { timeoutMs: 3000 })
-          if (status.volume === 0) {
-            await run("wpctl", ["set-volume", "@DEFAULT_AUDIO_SINK@", "0.7"], { timeoutMs: 3000 })
+      void (async () => {
+        const status = await audioStatus()
+        setAudio(root, status)
+        setQueue(root, queueCounts())
+        if (status.muted || status.volume === 0) {
+          if (options.autoUnmute === true) {
+            await run("wpctl", ["set-mute", "@DEFAULT_AUDIO_SINK@", "0"], { timeoutMs: 3000 })
+            if (status.volume === 0) {
+              await run("wpctl", ["set-volume", "@DEFAULT_AUDIO_SINK@", "0.7"], { timeoutMs: 3000 })
+            }
+            audioCache = null
+            log("output was silent; unmuted the default sink")
+          } else {
+            log(`warning: output sink is ${status.muted ? "muted" : "at zero volume"}`)
           }
-          audioCache = null
-          log("output was silent; unmuted the default sink")
-        } else {
-          log(`warning: output sink is ${status.muted ? "muted" : "at zero volume"}`)
         }
-      }
+      })().catch((error) => log("host audio check failed", String(error)))
 
-      const hostConfig = startupConfig
-      const outputDir = hostConfig.output?.directory || DEFAULT_OUTPUT_DIR
       const refreshStats = () => {
         void (async () => {
-          const usage = cacheUsage(outputDir)
+          setHostHeartbeat(root, hostname())
+          const usage = cacheUsage()
           setCache(root, usage.files, usage.bytes)
           setQueue(root, queueCounts())
           setGenerating(root, activeSpeak + processingCount(root))
@@ -1454,9 +1640,9 @@ export default Plugin.define({
       }
       refreshStats()
       const statsTimer = setInterval(refreshStats, 2_000)
-      cleanups.push(() => clearInterval(statsTimer))
+      stops.push(() => clearInterval(statsTimer))
 
-      const retention = retentionFor(hostConfig)
+      const retention = retentionFor(startupConfig)
       const sweep = () => {
         void purgeGenerated(root, location, undefined, { recordZero: false, all: true })
           .then((result) => {
@@ -1466,11 +1652,64 @@ export default Plugin.define({
       }
       if (retention.onStart) {
         const startTimer = setTimeout(sweep, 30_000)
-        cleanups.push(() => clearTimeout(startTimer))
+        stops.push(() => clearTimeout(startTimer))
       }
       const interval = setInterval(sweep, retention.intervalMin * 60_000)
-      cleanups.push(() => clearInterval(interval))
+      stops.push(() => clearInterval(interval))
+
+      if (auto) ensureDaemon(root, queueDirPath, socketPath, daemonEnv())
+      return () => stops.forEach((stop) => stop())
     }
+
+    let mode: ResolvedMode = "client"
+    let modeStopper: (() => void) | undefined
+
+    const applyMode = (next: ResolvedMode): { ok: boolean; reason?: string } => {
+      if (next === "host" && piperBinary(options, root, startupConfig) === null) {
+        hostCapable = false
+        return {
+          ok: false,
+          reason:
+            process.platform === "darwin"
+              ? "no macOS piper binary; run ./fetch-macos.sh or set the piperBin option"
+              : "no piper/piper binary; run ./fetch.sh or set the piperBin option",
+        }
+      }
+      hostCapable = next === "host" || piperBinary(options, root, startupConfig) !== null
+      modeStopper?.()
+      modeStopper = undefined
+      const previous = mode
+      mode = next
+      activeMode = next
+      if (next === "host") {
+        modeStopper = startHostPieces()
+      } else if (next === "client") {
+        // Start from now: switching back must not replay the whole index.
+        void ctx.storage.set("voiceClientLastAt", Date.now())
+        modeStopper = startClientPlayback(ctx, root, options)
+      }
+      log(`mode ${next} (was ${previous}, platform ${process.platform})`)
+      return { ok: true }
+    }
+
+    const determineMode = (): { mode: ResolvedMode; source: "option" | "override" | "auto" } => {
+      const override = readModeOverride(root)
+      if (override.mode !== "auto") return { mode: override.mode, source: "override" }
+      if (options.mode && options.mode !== "auto") return { mode: options.mode, source: "option" }
+      return { mode: resolveMode("auto", root, options, startupConfig), source: "auto" }
+    }
+
+    const initial = determineMode()
+    modeOrigin = initial.source
+    const applied = applyMode(initial.mode)
+    if (!applied.ok) {
+      log(`mode ${initial.mode} unavailable: ${applied.reason}; staying client`)
+      modeOrigin = "auto"
+      applyMode("client")
+    }
+    log(
+      `mode ${mode} (from ${modeOrigin}, requested ${modeOrigin === "override" ? readModeOverride(root).mode : requestedMode}, platform ${process.platform})`,
+    )
 
     try {
       await ctx.command.transform((editor) => {
@@ -1570,6 +1809,29 @@ export default Plugin.define({
           const args = (input ?? {}) as { enabled?: boolean; directory?: string; sessionID?: string }
           writeClientPlayback(root, args.enabled === true)
           if (args.enabled === true) await ctx.storage.set("voiceClientLastAt", Date.now())
+          return await voiceState(root, args.directory ?? location, args.sessionID, mode)
+        },
+        setMode: async (input: unknown) => {
+          const args = (input ?? {}) as { mode?: string; directory?: string; sessionID?: string }
+          if (args.mode === "remote") throw new Error("remote mode is specified but not implemented")
+          const requested: Mode =
+            args.mode === "host" || args.mode === "client" ? args.mode : "auto"
+          const previous = readModeOverride(root)
+          const next: ResolvedMode =
+            requested === "auto" ? resolveMode("auto", root, options, startupConfig) : requested
+          writeModeOverride(root, requested)
+          const applied = applyMode(next)
+          if (!applied.ok) {
+            writeModeOverride(root, previous.mode)
+            throw new Error(applied.reason ?? "mode could not be applied")
+          }
+          modeOrigin =
+            requested === "auto"
+              ? options.mode && options.mode !== "auto"
+                ? "option"
+                : "auto"
+              : "override"
+          logAction(root, "mode", "ok", `${next} (from ${modeOrigin})`)
           return await voiceState(root, args.directory ?? location, args.sessionID, mode)
         },
         setVolume: async (input: unknown) => {
@@ -1795,10 +2057,8 @@ export default Plugin.define({
 
     if (!auto) {
       log(`auto-speak off (config ${hasConfig ? "found" : "missing"}, option auto=${String(options.auto)})`)
-      return () => cleanups.forEach((cleanup) => cleanup())
+      return () => modeStopper?.()
     }
-
-    ensureDaemon(root, queueDir, sock)
 
     try {
       await ctx.session.hook("experimental.idle", async (event) => {
@@ -1902,6 +2162,6 @@ export default Plugin.define({
       log("auto-speak hook failed", String(error))
     }
 
-    return () => cleanups.forEach((cleanup) => cleanup())
+    return () => modeStopper?.()
   },
 })

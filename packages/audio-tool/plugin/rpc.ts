@@ -37,6 +37,35 @@ const state = {
     mutes,
     sidebar: { type: "boolean" },
     mode: { type: "string", enum: ["host", "client", "remote"] },
+    modeSource: { type: "string", enum: ["option", "override", "auto"] },
+    modeOverride: {
+      type: "object",
+      properties: {
+        at: { type: "number" },
+        mode: { type: "string", enum: ["auto", "host", "client"] },
+      },
+      required: ["at", "mode"],
+      additionalProperties: false,
+    },
+    canHost: { type: "boolean" },
+    hostHeartbeat: {
+      type: "object",
+      properties: {
+        machine: { type: "string" },
+        at: { type: "number" },
+      },
+      required: ["machine", "at"],
+      additionalProperties: false,
+    },
+    otherHost: {
+      type: "object",
+      properties: {
+        machine: { type: "string" },
+        at: { type: "number" },
+      },
+      required: ["machine", "at"],
+      additionalProperties: false,
+    },
     source: { type: "string", enum: ["local", "host"] },
     statsAgeMs: { type: "number" },
     generating: { type: "number" },
@@ -150,8 +179,18 @@ const state = {
       additionalProperties: false,
     },
   },
-  required: ["entries", "mutes", "sidebar", "mode", "source", "statsAgeMs", "generating"],
-  additionalProperties: false,
+  required: [
+    "entries",
+    "mutes",
+    "sidebar",
+    "mode",
+    "modeSource",
+    "modeOverride",
+    "canHost",
+    "source",
+    "statsAgeMs",
+    "generating",
+  ],  additionalProperties: false,
 } as const
 
 const location = {
@@ -192,6 +231,18 @@ export const Voice = Rpc.define({
           enabled: { type: "boolean" },
         },
         required: ["enabled"],
+        additionalProperties: false,
+      },
+      output: state,
+    },
+    setMode: {
+      input: {
+        type: "object",
+        properties: {
+          ...location,
+          mode: { type: "string", enum: ["auto", "host", "client"] },
+        },
+        required: ["directory", "mode"],
         additionalProperties: false,
       },
       output: state,

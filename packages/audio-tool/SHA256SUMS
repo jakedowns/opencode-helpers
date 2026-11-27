@@ -1,2 +1,8 @@
 0c44a6360a21367b5d03b8656c3e274f4de715f6533245d8c1f17c242631912b  piper/piper
 5efe09e69902187827af646e1a6e9d269dee769f9877d17b16b1b46eeaaf019f  voices/voice.onnx
+
+# macOS: fetch-macos.sh pins these itself. The 2023.11.14-2 macOS archives are
+# broken (x86_64 binary, shared libraries missing), so the working install is
+# the piper-tts Python wheel and these hashes only document the downloads.
+# 6b1eb03b3735946cb35216e063e7eebcc33a6bbf5dd96ec0217959bf1cdcb0cc  piper_macos_aarch64.tar.gz
+# ced85c0a3df13945b1e623b878a48fdc2854d5c485b4b67f62857cf551deaf8b  piper_macos_x64.tar.gz
