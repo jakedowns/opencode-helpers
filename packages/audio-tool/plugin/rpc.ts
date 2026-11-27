@@ -247,6 +247,15 @@ export const Voice = Rpc.define({
       },
       output: state,
     },
+    clearLog: {
+      input: {
+        type: "object",
+        properties: location,
+        required: ["directory"],
+        additionalProperties: false,
+      },
+      output: state,
+    },
     setVolume: {
       input: {
         type: "object",

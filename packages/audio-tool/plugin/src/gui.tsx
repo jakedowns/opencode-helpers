@@ -194,6 +194,13 @@ function AudioPanel(props: { session: Session }) {
       .then((next: unknown) => applyState(next as State))
       .catch((error) => fail("switch mode", error))
 
+  const clearLog = () =>
+    ctx.client
+      .rpc(Voice)
+      .clearLog({ directory: props.session.directory, sessionID: props.session.id })
+      .then((next: unknown) => applyState(next as State))
+      .catch((error) => fail("clear log", error))
+
   const purgeText = () => {
     const last = state()?.lastPurge
     const attempt = state()?.lastAttempt
@@ -460,7 +467,24 @@ function AudioPanel(props: { session: Session }) {
       </Show>
       <Show when={state()?.log?.length}>
         <div style={{ "border-top": "1px solid rgba(127,127,127,0.3)", "padding-top": "6px" }}>
-          <div style={{ opacity: 0.7 }}>Log</div>
+          <div
+            style={{
+              display: "flex",
+              "justify-content": "space-between",
+              "align-items": "center",
+              gap: "8px",
+            }}
+          >
+            <div style={{ opacity: 0.7 }}>Log</div>
+            <button
+              type="button"
+              className="voice-btn voice-btn-icon"
+              title="Delete every line in .voice-log.jsonl"
+              onClick={() => void clearLog()}
+            >
+              Clear
+            </button>
+          </div>
           <div
             style={{
               display: "flex",

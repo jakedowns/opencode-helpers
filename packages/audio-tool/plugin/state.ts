@@ -332,6 +332,23 @@ export function setLastAction(
   return writeState(root, state)
 }
 
+/** Truncate the append-only action log; returns how many lines were removed. */
+export function clearLog(root: string): number {
+  const file = path.join(root, ".voice-log.jsonl")
+  let lines = 0
+  try {
+    lines = readFileSync(file, "utf8").split("\n").filter((line) => line.trim()).length
+  } catch {
+    return 0
+  }
+  try {
+    writeFileSync(file, "")
+  } catch {
+    return 0
+  }
+  return lines
+}
+
 /** Client-playback flag: its own file, never rewritten by host stat updates. */
 export function clientPlaybackPath(root: string): string {
   return path.join(root, ".client-playback.json")

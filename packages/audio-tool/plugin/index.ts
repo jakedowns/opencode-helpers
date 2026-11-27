@@ -39,6 +39,7 @@ import {
   readModeOverride,
   writeModeOverride,
   setHostHeartbeat,
+  clearLog,
   setMute,
   setPurgeAttempt,
   setQueue,
@@ -1833,6 +1834,14 @@ export default Plugin.define({
                 : "auto"
               : "override"
           logAction(root, "mode", "ok", `${next} (from ${modeOrigin})`)
+          return await voiceState(root, args.directory ?? location, args.sessionID, mode)
+        },
+        clearLog: async (input: unknown) => {
+          const args = (input ?? {}) as { directory?: string; sessionID?: string }
+          const removed = clearLog(root)
+          const detail = `cleared ${removed} line${removed === 1 ? "" : "s"}`
+          setLastAction(root, "log", "ok", detail)
+          log(`${detail} from .voice-log.jsonl`)
           return await voiceState(root, args.directory ?? location, args.sessionID, mode)
         },
         setVolume: async (input: unknown) => {

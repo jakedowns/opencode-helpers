@@ -256,7 +256,9 @@ tail -f /media/share/opencode-audio-tool/.voice-log.jsonl
 ```
 
 The same outcome appears in the panel as `Last: repeat ✓ 11.51s`. Queue playback
-history lives in `/tmp/opencode/audio-replies/queue/drain.log`.
+history lives in `/tmp/opencode/audio-replies/queue/drain.log`. The **Clear**
+button in the panel's Log header truncates `.voice-log.jsonl` and reports the
+number of lines removed in the `Last:` row.
 
 The build is also defensive about this share: piper's output is polled for up to
 2 s before enqueue, and a "no such file" enqueue is retried once, because SMB
