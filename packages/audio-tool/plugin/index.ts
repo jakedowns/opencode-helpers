@@ -1428,12 +1428,13 @@ export default Plugin.define({
           const args = (input ?? {}) as { directory?: string; sessionID?: string }
           const dir = args.directory ?? location
           if (args.sessionID) {
-            setLastAction(root, "repeat", "running", "speaking the previous reply")
-            logAction(root, "repeat", "running")
+            const who = args.sessionID.slice(-6)
+            setLastAction(root, "repeat", "running", `speaking previous reply (${who})`)
+            logAction(root, "repeat", "running", `session ${who}`)
             try {
               const result = await speakLastReply(ctx, root, dir, args.sessionID)
               const outcome = result ? "ok" : "empty"
-              const detail = result ? `${result.seconds ?? "?"}s` : "no text to replay"
+              const detail = result ? `${result.seconds ?? "?"}s` : `no text to replay (${who})`
               setLastAction(root, "repeat", outcome, detail)
               logAction(root, "repeat", outcome, detail)
             } catch (error) {
@@ -1447,8 +1448,9 @@ export default Plugin.define({
           const args = (input ?? {}) as { directory?: string; sessionID?: string }
           const dir = args.directory ?? location
           if (args.sessionID) {
-            setLastAction(root, "summary", "running", "summarising")
-            logAction(root, "summary", "running")
+            const who = args.sessionID.slice(-6)
+            setLastAction(root, "summary", "running", `summarising (${who})`)
+            logAction(root, "summary", "running", `session ${who}`)
             try {
               const result = await speakSummary(ctx, root, dir, args.sessionID)
               const outcome = result ? "ok" : "empty"
