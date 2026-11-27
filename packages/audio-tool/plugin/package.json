@@ -1,6 +1,6 @@
 {
   "name": "@jakedowns/assistant-voice-opencode-plugin",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Local text-to-speech for OpenCode: Piper voice tools, auto-speak, and audio panels for the TUI and desktop GUI",
   "type": "module",
   "main": "./index.ts",
