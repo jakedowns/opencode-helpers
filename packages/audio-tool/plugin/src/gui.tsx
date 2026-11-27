@@ -376,9 +376,17 @@ function AudioPanel(props: { session: Session }) {
         </span>
         <span style={{ opacity: 0.6 }}>{activeMute() ? "turn on" : "mute all"}</span>
       </button>
-      <div style={{ display: "flex", "align-items": "center", gap: "8px", "flex-wrap": "wrap" }}>
+      <div
+        style={{
+          display: "flex",
+          "align-items": "center",
+          gap: "8px",
+          "flex-wrap": "nowrap",
+          "min-width": "0",
+        }}
+      >
         <label
-          style={{ display: "flex", "align-items": "center", gap: "6px" }}
+          style={{ display: "flex", "align-items": "center", gap: "6px", "flex": "0 0 auto" }}
           title={
             state()?.canHost === false
               ? "No piper binary for this machine; run ./fetch-macos.sh or set piperBin"
@@ -397,19 +405,34 @@ function AudioPanel(props: { session: Session }) {
           <button
             type="button"
             className="voice-btn"
+            style={{ "flex": "0 0 auto" }}
             title="Forget the per-machine override and follow the option / auto-detection"
             onClick={() => void setMode("auto")}
           >
             Auto
           </button>
         </Show>
+        <Show when={state()?.mode === "host" && state()?.otherHost}>
+          <span
+            title={`Another host is active: ${state()?.otherHost?.machine} (${Math.max(
+              0,
+              Math.round((Date.now() - (state()?.otherHost?.at ?? Date.now())) / 1000),
+            )}s ago)`}
+            style={{
+              color: "#c08020",
+              "font-size": "11px",
+              "margin-left": "auto",
+              "flex": "0 1 auto",
+              "min-width": "0",
+              overflow: "hidden",
+              "text-overflow": "ellipsis",
+              "white-space": "nowrap",
+            }}
+          >
+            ⚠ {state()?.otherHost?.machine} also host
+          </span>
+        </Show>
       </div>
-      <Show when={state()?.mode === "host" && state()?.otherHost}>
-        <div style={{ color: "#c08020" }}>
-          ⚠ Another host is active: {state()?.otherHost?.machine} ·{" "}
-          {Math.max(0, Math.round((Date.now() - (state()?.otherHost?.at ?? Date.now())) / 1000))}s ago
-        </div>
-      </Show>
       <Show when={state()?.cache}>
         <div style={{ opacity: 0.7 }}>
           Cache (all): {formatBytes(state()?.cache?.bytes ?? 0)} · {state()?.cache?.files ?? 0} file

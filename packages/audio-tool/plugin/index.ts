@@ -213,10 +213,22 @@ function writePlaybackRate(rate: number): number {
   return value
 }
 
+/**
+ * This machine's view of the share. `sharedRoot` wins; otherwise derive it
+ * from the canonical monorepo checkout path (the same rule the output mapping
+ * uses), so a Mac config that only sets `root` still gets the right cache dir.
+ */
+function shareRoot(root: string, configured?: string): string | null {
+  if (configured) return configured
+  const marker = "/opencode-helpers/packages/audio-tool"
+  if (root.endsWith(marker)) return root.slice(0, -marker.length) || "/"
+  return null
+}
+
 /** Cache/purge root: a real local path, not the VM-only /media/share path. */
-function audioRoot(opts: Options): string {
-  if (opts.sharedRoot) return path.join(opts.sharedRoot, "tmp", "audio")
-  return DEFAULT_AUDIO_ROOT
+function audioRoot(opts: Options, root: string): string {
+  const shared = shareRoot(root, opts.sharedRoot)
+  return shared ? path.join(shared, "tmp", "audio") : DEFAULT_AUDIO_ROOT
 }
 
 /** ffmpeg: config, then FFMPEG, then the historical shared path, then PATH. */
@@ -507,12 +519,8 @@ function wavDuration(file: string): number {
 function mapSharedPath(root: string, configured: string | undefined, target: string): string | null {
   const base = "/media/share"
   if (target !== base && !target.startsWith(`${base}/`)) return null
-  let localRoot = configured
-  if (!localRoot) {
-    const marker = "/opencode-helpers/packages/audio-tool"
-    if (!root.endsWith(marker)) return null
-    localRoot = root.slice(0, -marker.length) || "/"
-  }
+  const localRoot = shareRoot(root, configured)
+  if (!localRoot) return null
   return path.join(localRoot, target.slice(base.length + 1))
 }
 
@@ -1950,7 +1958,7 @@ export default Plugin.define({
     hostOptions = options
     queueDirPath = process.env.AUDIOQ_DIR || DEFAULT_QUEUE
     socketPath = process.env.AUDIOQ_SOCK || DEFAULT_SOCK
-    audioRootDir = audioRoot(options)
+    audioRootDir = audioRoot(options, root)
     const startupConfig = await readConfig(root, location)
     pluginConfig = startupConfig
     const speakSubagents =
