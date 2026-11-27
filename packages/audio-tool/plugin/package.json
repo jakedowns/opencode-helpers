@@ -17,7 +17,7 @@
   ],
   "scripts": {
     "build": "npm run build:tui && npm run build:gui",
-    "build:tui": "esbuild src/tui.tsx --bundle --format=esm --platform=node --target=node20 --external:@opencode/plugin/tui --external:solid-js --external:'solid-js/*' --external:'@opentui/*' --outfile=tui.js",
+    "build:tui": "esbuild src/tui.tsx --bundle --format=esm --platform=node --target=node20 --jsx=automatic --jsx-import-source=@opentui/solid --external:@opencode/plugin/tui --external:solid-js --external:'solid-js/*' --external:'@opentui/*' --outfile=tui.js",
     "build:gui": "vite build",
     "prepublishOnly": "npm run build"
   },
