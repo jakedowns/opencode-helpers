@@ -25,7 +25,6 @@ function readState(root) {
       projects: parsed?.projects && typeof parsed.projects === "object" ? parsed.projects : {},
       sessions: parsed?.sessions && typeof parsed.sessions === "object" ? parsed.sessions : {},
       sidebar: parsed?.sidebar !== false,
-      clientPlayback: parsed?.clientPlayback && typeof parsed.clientPlayback.at === "number" ? { at: parsed.clientPlayback.at, enabled: parsed.clientPlayback.enabled === true } : void 0,
       lastAction: parsed?.lastAction && typeof parsed.lastAction.at === "number" ? {
         at: parsed.lastAction.at,
         kind: String(parsed.lastAction.kind ?? ""),

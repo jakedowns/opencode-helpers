@@ -33,7 +33,8 @@ import {
   resolveMutes,
   setAudio,
   setCache,
-  setClientPlayback,
+  readClientPlayback,
+  writeClientPlayback,
   setMute,
   setPurgeAttempt,
   setQueue,
@@ -361,7 +362,7 @@ function startClientPlayback(ctx: any, root: string, opts: Options): () => void 
   const timer = setInterval(() => {
     void (async () => {
       const state = readState(root)
-      if (!state.clientPlayback?.enabled || busy) return
+      if (!readClientPlayback(root).enabled || busy) return
       busy = true
       try {
         let last = Number((await ctx.storage.get(key)) ?? 0)
@@ -830,7 +831,7 @@ async function speakDurableInner(
   }
   const gen = (Date.now() - started) / 1000
 
-  const clientPlays = readState(root).clientPlayback?.enabled === true
+  const clientPlays = readClientPlayback(root).enabled
   const audioSeconds = wavDuration(outFile)
   const enqueueArgs = [path.join(root, "audioq.py"), "enqueue", outFile, "--text", spoken]
   if (resolvedTitle) enqueueArgs.push("--session", resolvedTitle)
@@ -1222,7 +1223,10 @@ async function voiceState(
     queue,
     log: readRecentLog(root),
   }
-  if (state.clientPlayback) result.clientPlayback = state.clientPlayback
+  {
+    const playback = readClientPlayback(root)
+    if (playback.at > 0) result.clientPlayback = playback
+  }
   if (state.stats) result.stats = state.stats
   if (state.lastSpeaker) result.lastSpeaker = state.lastSpeaker
   if (state.lastAction) result.lastAction = state.lastAction
@@ -1564,7 +1568,7 @@ export default Plugin.define({
         },
         setClientPlayback: async (input: unknown) => {
           const args = (input ?? {}) as { enabled?: boolean; directory?: string; sessionID?: string }
-          setClientPlayback(root, args.enabled === true)
+          writeClientPlayback(root, args.enabled === true)
           if (args.enabled === true) await ctx.storage.set("voiceClientLastAt", Date.now())
           return await voiceState(root, args.directory ?? location, args.sessionID, mode)
         },

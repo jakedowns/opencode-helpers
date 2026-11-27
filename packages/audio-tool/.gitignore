@@ -60,3 +60,6 @@ plugin/package-lock.json
 
 # Plugin action log
 .voice-log.jsonl
+
+# Per-machine client playback toggle
+.client-playback.json

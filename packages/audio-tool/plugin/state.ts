@@ -69,10 +69,6 @@ export function readState(root: string): VoiceState {
       projects: parsed?.projects && typeof parsed.projects === "object" ? parsed.projects : {},
       sessions: parsed?.sessions && typeof parsed.sessions === "object" ? parsed.sessions : {},
       sidebar: parsed?.sidebar !== false,
-      clientPlayback:
-        parsed?.clientPlayback && typeof parsed.clientPlayback.at === "number"
-          ? { at: parsed.clientPlayback.at, enabled: parsed.clientPlayback.enabled === true }
-          : undefined,
       lastAction:
         parsed?.lastAction && typeof parsed.lastAction.at === "number"
           ? {
@@ -315,8 +311,41 @@ export function setLastAction(
   return writeState(root, state)
 }
 
-export function setClientPlayback(root: string, enabled: boolean): VoiceState {
-  const state = readState(root)
-  state.clientPlayback = { at: Date.now(), enabled }
-  return writeState(root, state)
+/** Client-playback flag: its own file, never rewritten by host stat updates. */
+export function clientPlaybackPath(root: string): string {
+  return path.join(root, ".client-playback.json")
+}
+
+export function readClientPlayback(root: string): ClientPlayback {
+  try {
+    const raw = JSON.parse(readFileSync(clientPlaybackPath(root), "utf8")) as {
+      at?: number
+      enabled?: boolean
+    }
+    return { at: Number(raw.at) || 0, enabled: raw.enabled === true }
+  } catch {
+    return { at: 0, enabled: false }
+  }
+}
+
+export function writeClientPlayback(root: string, enabled: boolean): ClientPlayback {
+  const value = { at: Date.now(), enabled }
+  const file = clientPlaybackPath(root)
+  const tmp = `${file}.${process.pid}-${Date.now().toString(36)}.part`
+  try {
+    writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`)
+    renameSync(tmp, file)
+  } catch {
+    try {
+      writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`)
+    } catch {
+      /* ignore */
+    }
+    try {
+      unlinkSync(tmp)
+    } catch {
+      /* ignore */
+    }
+  }
+  return value
 }
