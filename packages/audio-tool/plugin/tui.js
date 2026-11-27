@@ -208,6 +208,20 @@ var state = {
       required: ["at", "windowStart", "turns", "spoken", "skipped", "sessions"],
       additionalProperties: false
     },
+    log: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          at: { type: "string" },
+          kind: { type: "string" },
+          status: { type: "string" },
+          detail: { type: "string" }
+        },
+        required: ["at", "kind", "status"],
+        additionalProperties: false
+      }
+    },
     lastAction: {
       type: "object",
       properties: {
@@ -504,8 +518,12 @@ var tui_default = Plugin.define({
           message: verb === "summary" || verb === "summarize" ? "voice: summarising\u2026" : "voice: replaying previous reply\u2026",
           variant: "info"
         });
-        void call.catch(() => {
-        });
+        void call.catch(
+          (error) => ctx.ui.toast.show({
+            message: `voice: ${verb} failed: ${String(error).slice(0, 200)}`,
+            variant: "warning"
+          })
+        );
         return;
       }
       if (verb === "purge") {

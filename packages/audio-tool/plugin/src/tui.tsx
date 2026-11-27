@@ -94,7 +94,12 @@ export default Plugin.define({
           message: verb === "summary" || verb === "summarize" ? "voice: summarising…" : "voice: replaying previous reply…",
           variant: "info",
         })
-        void call.catch(() => {})
+        void call.catch((error) =>
+          ctx.ui.toast.show({
+            message: `voice: ${verb} failed: ${String(error).slice(0, 200)}`,
+            variant: "warning",
+          }),
+        )
         return
       }
       if (verb === "purge") {

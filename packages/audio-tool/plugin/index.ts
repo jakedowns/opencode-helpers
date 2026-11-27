@@ -261,6 +261,33 @@ async function fileReady(target: string, ms = 2000): Promise<boolean> {
   }
 }
 
+function readRecentLog(root: string, limit = 12): Array<{ at: string; kind: string; status: string; detail?: string }> {
+  try {
+    const lines = readFileSync(path.join(root, ".voice-log.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .slice(-limit)
+    return lines
+      .map((line) => {
+        try {
+          const item = JSON.parse(line) as { at?: string; kind?: string; status?: string; detail?: string }
+          if (!item.at || !item.kind || !item.status) return null
+          return {
+            at: String(item.at),
+            kind: String(item.kind),
+            status: String(item.status),
+            ...(typeof item.detail === "string" && item.detail ? { detail: item.detail } : {}),
+          }
+        } catch {
+          return null
+        }
+      })
+      .filter((item): item is { at: string; kind: string; status: string; detail?: string } => Boolean(item))
+  } catch {
+    return []
+  }
+}
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
@@ -1066,6 +1093,7 @@ async function voiceState(
     stats?: VoiceStats
     lastSpeaker?: { at: number; session: string }
     lastAction?: { at: number; kind: string; status: string; detail?: string }
+    log: Array<{ at: string; kind: string; status: string; detail?: string }>
     lastPurge?: { at: number; removed: number; bytes: number }
     lastAttempt?: { at: number; removed: number; bytes: number }
   } = {
@@ -1082,6 +1110,7 @@ async function voiceState(
     cache,
     audio,
     queue,
+    log: readRecentLog(root),
   }
   if (state.stats) result.stats = state.stats
   if (state.lastSpeaker) result.lastSpeaker = state.lastSpeaker
@@ -1400,15 +1429,21 @@ export default Plugin.define({
         remove: async (input: unknown) => {
           const args = (input ?? {}) as { directory?: string; sessionID?: string; path?: string }
           if (args.path) {
-            if (mode === "client") {
-              writeControl(root, { kind: "remove", path: args.path })
+            try {
+              if (mode === "client") {
+                writeControl(root, { kind: "remove", path: args.path })
               const deadline = Date.now() + 8000
               while (Date.now() < deadline) {
                 await new Promise((resolve) => setTimeout(resolve, 300))
                 if (!readIndex(root, 500).some((entry) => entry.path === args.path)) break
               }
-            } else {
-              removeEntry(root, args.path)
+              } else {
+                removeEntry(root, args.path)
+              }
+              logAction(root, "remove", "ok", path.basename(args.path))
+            } catch (error) {
+              logAction(root, "remove", "error", String(error))
+              throw error
             }
           }
           return await voiceState(root, args.directory ?? location, args.sessionID, mode)
@@ -1466,12 +1501,18 @@ export default Plugin.define({
         },
         purge: async (input: unknown) => {
           const args = (input ?? {}) as { directory?: string; sessionID?: string; days?: number }
-          if (mode === "client") {
-            const before = readState(root).lastPurge?.at ?? 0
-            writeControl(root, { kind: "purge", days: args.days })
-            await waitForState(root, before)
-          } else {
-            await purgeGenerated(root, args.directory ?? location, args.days)
+          try {
+            if (mode === "client") {
+              const before = readState(root).lastPurge?.at ?? 0
+              writeControl(root, { kind: "purge", days: args.days })
+              await waitForState(root, before)
+            } else {
+              const result = await purgeGenerated(root, args.directory ?? location, args.days)
+              logAction(root, "purge", "ok", `${result.removed} files / ${result.freed}`)
+            }
+          } catch (error) {
+            logAction(root, "purge", "error", String(error))
+            throw error
           }
           return await voiceState(root, args.directory ?? location, args.sessionID, mode)
         },

@@ -85,6 +85,20 @@ const state = {
       required: ["at", "windowStart", "turns", "spoken", "skipped", "sessions"],
       additionalProperties: false,
     },
+    log: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          at: { type: "string" },
+          kind: { type: "string" },
+          status: { type: "string" },
+          detail: { type: "string" },
+        },
+        required: ["at", "kind", "status"],
+        additionalProperties: false,
+      },
+    },
     lastAction: {
       type: "object",
       properties: {

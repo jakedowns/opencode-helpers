@@ -43,6 +43,7 @@ type State = {
   lastPurge?: Purge
   lastAttempt?: Purge
   lastAction?: { at: number; kind: string; status: "running" | "ok" | "empty" | "error"; detail?: string }
+  log?: Array<{ at: string; kind: string; status: string; detail?: string }>
 }
 
 type Session = { id: string; directory: string }
@@ -86,7 +87,7 @@ function AudioPanel(props: { session: Session }) {
       .rpc(Voice)
       .state({ directory: props.session.directory, sessionID: props.session.id })
       .then((next: unknown) => setState(next as State))
-      .catch(() => {})
+      .catch((error) => fail("refresh", error))
 
   onMount(() => {
     void refresh()
@@ -99,14 +100,14 @@ function AudioPanel(props: { session: Session }) {
       .rpc(Voice)
       .replay({ directory: props.session.directory, sessionID: props.session.id, path: file })
       .then((next: unknown) => setState(next as State))
-      .catch(() => {})
+      .catch((error) => fail("replay", error))
 
   const remove = (file: string) =>
     ctx.client
       .rpc(Voice)
       .remove({ directory: props.session.directory, sessionID: props.session.id, path: file })
       .then((next: unknown) => setState(next as State))
-      .catch(() => {})
+      .catch((error) => fail("delete", error))
 
   const purge = (days?: number) =>
     ctx.client
@@ -117,14 +118,14 @@ function AudioPanel(props: { session: Session }) {
         ...(typeof days === "number" ? { days } : {}),
       })
       .then((next: unknown) => setState(next as State))
-      .catch(() => {})
+      .catch((error) => fail("mute", error))
 
   const setVolume = (value: number) =>
     ctx.client
       .rpc(Voice)
       .setVolume({ directory: props.session.directory, sessionID: props.session.id, value })
       .then((next: unknown) => setState(next as State))
-      .catch(() => {})
+      .catch((error) => fail("purge", error))
 
   const toggle = (scope: "session" | "project" | "global") => {
     const current = state()?.mutes
@@ -360,6 +361,31 @@ function AudioPanel(props: { session: Session }) {
       <Show when={purgeText()}>
         <div style={{ opacity: 0.7 }}>{purgeText()}</div>
       </Show>
+      <Show when={state()?.log?.length}>
+        <div style={{ "border-top": "1px solid rgba(127,127,127,0.3)", "padding-top": "6px" }}>
+          <div style={{ opacity: 0.7 }}>Log</div>
+          <div
+            style={{
+              display: "flex",
+              "flex-direction": "column",
+              gap: "2px",
+              "font-family": "ui-monospace, SFMono-Regular, Menlo, monospace",
+              "font-size": "11px",
+              "max-height": "140px",
+              "overflow-y": "auto",
+            }}
+          >
+            <For each={[...(state()?.log ?? [])].reverse()}>
+              {(line) => (
+                <div style={{ opacity: line.status === "error" ? 1 : 0.75 }}>
+                  {line.at.slice(11, 19)} {line.kind} {line.status}
+                  {line.detail ? ` · ${line.detail}` : ""}
+                </div>
+              )}
+            </For>
+          </div>
+        </div>
+      </Show>
       <Show when={state()?.entries.length} fallback={<div style={{ opacity: 0.6 }}>No audio yet.</div>}>
         <div
           style={{
@@ -439,6 +465,15 @@ export default Plugin.define({
       if (session) ctx.layout.open(`${ctx.id}:main`, session)
     }
 
+    const fail = (action: string, error: unknown) => {
+      ctx.toast.show({
+        title: `Voice: ${action} failed`,
+        description: String(error).slice(0, 300),
+        variant: "error",
+        duration: 8000,
+      })
+    }
+
     const runCommand = (input?: string) => {
       const { verb, parts } = parseVoiceInput(input)
       const scope = (parts[1] ?? "session").toLowerCase()
@@ -451,7 +486,7 @@ export default Plugin.define({
         void ctx.client
           .rpc(Voice)
           .repeat({ directory: session.directory, sessionID: session.id })
-          .catch(() => {})
+          .catch((error) => fail("speak previous reply", error))
         return
       }
       if (verb === "summary" || verb === "summarize") {
@@ -459,7 +494,7 @@ export default Plugin.define({
         void ctx.client
           .rpc(Voice)
           .summary({ directory: session.directory, sessionID: session.id })
-          .catch(() => {})
+          .catch((error) => fail("summarise", error))
         return
       }
       if (verb === "sidebar") return // TUI-only surface
@@ -473,7 +508,7 @@ export default Plugin.define({
             ...(typeof days === "number" && Number.isFinite(days) ? { days } : {}),
           })
           .then(() => openTool())
-          .catch(() => {})
+          .catch((error) => fail("purge", error))
         return
       }
       if (verb === "mute" || verb === "unmute" || verb === "toggle") {
@@ -489,7 +524,7 @@ export default Plugin.define({
                 .rpc(Voice)
                 .setMute({ directory: session.directory, sessionID: session.id, scope, value })
             })
-            .catch(() => {})
+            .catch((error) => fail("toggle mute", error))
           return
         }
         void ctx.client.rpc(Voice).setMute({
