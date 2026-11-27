@@ -83,6 +83,13 @@ function AudioPanel(props: { session: Session }) {
     onCleanup(() => clearInterval(timer))
   })
 
+  const replay = (file: string) =>
+    ctx.client
+      .rpc(Voice)
+      .replay({ directory: props.session.directory, sessionID: props.session.id, path: file })
+      .then((next: unknown) => setState(next as State))
+      .catch(() => {})
+
   const remove = (file: string) =>
     ctx.client
       .rpc(Voice)
@@ -307,7 +314,18 @@ function AudioPanel(props: { session: Session }) {
         >
           <For each={state()?.entries ?? []}>
             {(entry: Entry) => (
-              <div style={{ display: "flex", "align-items": "center", gap: "8px" }}>
+              <div
+                title="Click to replay"
+                onClick={() => void replay(entry.path)}
+                style={{
+                  display: "flex",
+                  "align-items": "center",
+                  gap: "8px",
+                  cursor: "pointer",
+                  padding: "2px 4px",
+                  "border-radius": "4px",
+                }}
+              >
                 <span
                   style={{
                     overflow: "hidden",
@@ -327,7 +345,10 @@ function AudioPanel(props: { session: Session }) {
                   className="voice-btn voice-btn-icon"
                   title="Delete this file from disk"
                   aria-label={`Delete ${entryLabel(entry)}`}
-                  onClick={() => void remove(entry.path)}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    void remove(entry.path)
+                  }}
                 >
                   ✕
                 </button>

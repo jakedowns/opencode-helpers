@@ -175,7 +175,9 @@ export default Plugin.define({
               <text>  nothing yet</text>
             ) : (
               entries.map((entry) => (
-                <text>{`  ${entryLabel(entry)}  ${entry.seconds ? `${entry.seconds}s` : ""}  ${age(entry.at)}`}</text>
+                <box onMouseDown={() => replay(entry.path)}>
+                  <text>{`  ${entryLabel(entry)}  ${entry.seconds ? `${entry.seconds}s` : ""}  ${age(entry.at)}`}</text>
+                </box>
               ))
             )}
           </box>

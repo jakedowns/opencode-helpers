@@ -514,6 +514,46 @@ async function speakSummary(
   return result
 }
 
+/** Re-enqueue an existing reply. MP3s are transcoded to a temp WAV because the
+ * queue and aplay only speak WAV. */
+async function replayFile(root: string, cwd: string, target: string): Promise<boolean> {
+  const file = path.resolve(target)
+  if (!existsSync(file)) return false
+  const entry = readIndex(root, 500).find((item) => path.resolve(item.path) === file)
+  let wav = file
+  let tmp: string | undefined
+  if (/\.mp3$/i.test(file)) {
+    const config = await readConfig(root, cwd)
+    const ffmpeg = config.output?.ffmpeg || process.env.FFMPEG || "/media/share/tmp/tools/ffmpeg/ffmpeg"
+    tmp = path.join("/tmp/opencode/audio-replies", `replay-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}.wav`)
+    const convert = await run(ffmpeg, ["-y", "-hide_banner", "-loglevel", "error", "-i", file, "-acodec", "pcm_s16le", tmp], {
+      cwd,
+      timeoutMs: 60_000,
+    })
+    if (convert.code !== 0 || !existsSync(tmp)) {
+      log("replay transcode failed", convert.stderr.slice(0, 200))
+      return false
+    }
+    wav = tmp
+  }
+  const args = [path.join(root, "audioq.py"), "enqueue", wav, "--text", ""]
+  if (entry?.session) args.push("--session", entry.session)
+  const queued = await run("python3", args, { cwd })
+  if (tmp) {
+    try {
+      unlinkSync(tmp)
+    } catch {
+      /* queue holds its own link */
+    }
+  }
+  if (queued.code !== 0) {
+    log("replay enqueue failed", queued.stderr.slice(0, 200))
+    return false
+  }
+  setQueue(root, queueCounts())
+  return true
+}
+
 /** Delete one indexed reply from disk and from the index. Only paths the index
  * knows about can be removed, and both format variants of the basename go. */
 function removeEntry(root: string, target: string): boolean {
@@ -1041,6 +1081,16 @@ function startRequestWatcher(root: string, location: string): () => void {
             log("purge request served")
             continue
           }
+          if (request.kind === "replay" && request.path) {
+            await replayFile(root, location, request.path)
+            try {
+              unlinkSync(claim)
+            } catch {
+              /* sweep will clean it */
+            }
+            log("replay request served")
+            continue
+          }
           if (request.kind === "volume" && typeof (request as { value?: number }).value === "number") {
             await setSinkVolume(Number((request as { value?: number }).value))
             try {
@@ -1232,6 +1282,18 @@ export default Plugin.define({
           }
           const scope = (args.scope ?? "session") as "session" | "project" | "global"
           setMute(root, scope, args.directory ?? location, args.sessionID, args.value === true)
+          return await voiceState(root, args.directory ?? location, args.sessionID, mode)
+        },
+        replay: async (input: unknown) => {
+          const args = (input ?? {}) as { directory?: string; sessionID?: string; path?: string }
+          if (args.path) {
+            if (mode === "client") {
+              writeControl(root, { kind: "replay", path: args.path })
+              await new Promise((resolve) => setTimeout(resolve, 1500))
+            } else {
+              await replayFile(root, args.directory ?? location, args.path)
+            }
+          }
           return await voiceState(root, args.directory ?? location, args.sessionID, mode)
         },
         remove: async (input: unknown) => {

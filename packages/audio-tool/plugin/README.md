@@ -292,10 +292,12 @@ global, project and session mutes in one click; when on, it mutes globally.
 The queue line names the session whose reply is playing, using `--session` on
 `audioq.py enqueue`. A client-supplied title is carried through the request file
 (`sessionTitle`) and used for both the preamble and the queue sidecar, so the
-Mac's session name survives the hop. Host stats refresh every 5 s. Each row in the
-GUI panel has an **✕** button that deletes that reply from disk and from the
-index; only paths present in the index can be removed, and both `.wav`/`.mp3`
-variants of that basename go.
+Mac's session name survives the hop. Host stats refresh every 5 s. Clicking a row replays it: the host transcodes MP3 → temporary WAV, enqueues it
+with the original session title, and deletes the temp file once the queue owns
+it. Each row also has an **✕** that deletes that reply from disk and from the
+index (click it, not the row; it stops propagation). Only paths present in the
+index can be replayed or removed, and both `.wav`/`.mp3` variants of that
+basename go on delete. The TUI audio page supports the same row click.
 
 Purge is split in two styled buttons: **Purge older** applies the retention
 policy, **Purge all** ignores it and is marked as destructive (red border).
