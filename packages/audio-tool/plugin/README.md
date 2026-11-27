@@ -227,17 +227,20 @@ instead of failing.
   "mp3_bitrate": "128k",
   "ffmpeg": "/media/share/tmp/tools/ffmpeg/ffmpeg",
   "retention": {
-    "max_age_days": 14,
+    "auto_purge_minutes": 30,   // 0 disables automatic purging
+    "max_age_days": 14,         // hard ceiling if auto purge is off
     "max_files": 200,
     "sweep_on_start": true,
-    "sweep_interval_minutes": 60
+    "sweep_interval_minutes": 5
   }
 }
 ```
 
-A host sweeps `reply-*.wav`/`reply-*.mp3` in `output.directory` on start (after
-30 s) and on the interval, deleting anything older than `max_age_days` and then
-trimming to `max_files`. Manual purge, all three clients:
+A host sweeps every 5 minutes (and 30 s after start). `auto_purge_minutes`
+wins over `max_age_days` when it is smaller — the default is 30 minutes, so
+generated audio does not accumulate. Scheduled sweeps cover the whole shared
+audio root (`/media/share/tmp/audio` and its project subdirectories); manual
+purge only touches the current project. `max_files` still caps the count. Manual purge, all three clients:
 
 | Where | Command |
 |---|---|

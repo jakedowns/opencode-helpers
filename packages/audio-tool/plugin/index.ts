@@ -174,6 +174,7 @@ type ReplyConfig = {
     ffmpeg?: string
     retention?: {
       max_age_days?: number
+      auto_purge_minutes?: number
       max_files?: number
       sweep_on_start?: boolean
       sweep_interval_minutes?: number
@@ -190,16 +191,23 @@ type ReplyConfig = {
 
 const DEFAULT_OUTPUT_DIR = "/media/share/tmp/audio/opencode-audio-tool"
 
-type Retention = { days: number; maxFiles: number; onStart: boolean; intervalMin: number }
+type Retention = {
+  days: number
+  autoMinutes: number
+  maxFiles: number
+  onStart: boolean
+  intervalMin: number
+}
 
 function retentionFor(config: ReplyConfig): Retention {
   const value = config.output?.retention ?? {}
   const days = Number.isFinite(value.max_age_days) ? Number(value.max_age_days) : 14
+  const autoMinutes = Number.isFinite(value.auto_purge_minutes) ? Number(value.auto_purge_minutes) : 30
   const maxFiles = Number.isFinite(value.max_files) ? Number(value.max_files) : 200
   const intervalMin = Number.isFinite(value.sweep_interval_minutes)
     ? Math.max(1, Number(value.sweep_interval_minutes))
-    : 60
-  return { days, maxFiles, onStart: value.sweep_on_start !== false, intervalMin }
+    : 5
+  return { days, autoMinutes, maxFiles, onStart: value.sweep_on_start !== false, intervalMin }
 }
 
 /**
@@ -226,7 +234,7 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
 }
 
-function removeReplyWavs(dir: string, days: number, maxFiles?: number): { removed: number; bytes: number } {
+function removeReplyWavs(dir: string, maxAgeMs: number, maxFiles?: number): { removed: number; bytes: number } {
   let names: string[] = []
   try {
     names = readdirSync(dir).filter(
@@ -235,7 +243,7 @@ function removeReplyWavs(dir: string, days: number, maxFiles?: number): { remove
   } catch {
     return { removed: 0, bytes: 0 }
   }
-  const cutoff = Date.now() - days * 86_400_000
+  const cutoff = maxAgeMs > 0 ? Date.now() - maxAgeMs : Number.POSITIVE_INFINITY
   let removed = 0
   let bytes = 0
   const survivors: Array<{ file: string; mtime: number }> = []
@@ -243,7 +251,7 @@ function removeReplyWavs(dir: string, days: number, maxFiles?: number): { remove
     const file = path.join(dir, name)
     try {
       const stat = statSync(file)
-      if (days <= 0 || stat.mtimeMs < cutoff) {
+      if (maxAgeMs === 0 || stat.mtimeMs < cutoff) {
         unlinkSync(file)
         removed += 1
         bytes += stat.size
@@ -274,14 +282,40 @@ async function purgeGenerated(
   root: string,
   cwd: string,
   days?: number,
-  options: { recordZero?: boolean } = {},
+  options: { recordZero?: boolean; all?: boolean } = {},
 ): Promise<{ removed: number; bytes: number; freed: string }> {
   const config = await readConfig(root, cwd)
   const retention = retentionFor(config)
-  const dir = config.output?.directory || DEFAULT_OUTPUT_DIR
-  const useDays = typeof days === "number" ? days : retention.days
-  const result = removeReplyWavs(dir, useDays, typeof days === "number" ? undefined : retention.maxFiles)
-  if (useDays <= 0) {
+  const projectDir = config.output?.directory || DEFAULT_OUTPUT_DIR
+  const maxAgeMs =
+    typeof days === "number"
+      ? days <= 0
+        ? 0
+        : days * 86_400_000
+      : retention.autoMinutes > 0
+        ? Math.min(retention.autoMinutes * 60_000, retention.days * 86_400_000)
+        : retention.days * 86_400_000
+
+  const dirs = options.all ? [AUDIO_ROOT] : [projectDir]
+  if (options.all) {
+    try {
+      for (const entry of readdirSync(AUDIO_ROOT, { withFileTypes: true })) {
+        if (entry.isDirectory()) dirs.push(path.join(AUDIO_ROOT, entry.name))
+      }
+    } catch {
+      /* root missing */
+    }
+  }
+
+  let removed = 0
+  let bytes = 0
+  for (const dir of dirs) {
+    const partial = removeReplyWavs(dir, maxAgeMs, typeof days === "number" ? undefined : retention.maxFiles)
+    removed += partial.removed
+    bytes += partial.bytes
+  }
+  const result = { removed, bytes }
+  if (typeof days === "number" && days <= 0) {
     try {
       writeFileSync(path.join(root, ".voice-index.json"), "[]\n")
     } catch {
@@ -294,7 +328,7 @@ async function purgeGenerated(
     setPurgeAttempt(root, result.removed, result.bytes)
   }
   {
-    const usage = cacheUsage(dir)
+    const usage = cacheUsage()
     setCache(root, usage.files, usage.bytes)
     setQueue(root, queueCounts())
     setAudio(root, await audioStatus())
@@ -1122,7 +1156,7 @@ export default Plugin.define({
 
       const retention = retentionFor(hostConfig)
       const sweep = () => {
-        void purgeGenerated(root, location, undefined, { recordZero: false })
+        void purgeGenerated(root, location, undefined, { recordZero: false, all: true })
           .then((result) => {
             if (result.removed > 0) log(`retention removed ${result.removed} files (${result.freed})`)
           })

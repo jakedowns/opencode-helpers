@@ -113,6 +113,7 @@ future agent can tell whether a local copy still matches this repo.
 | 4 | 2026-11-26 | `output.format` (mp3 default), `output.mp3_bitrate`, `output.ffmpeg`, `output.retention` (14 days / 200 files) |
 | 5 | 2026-11-26 | `synthesis.voice_per_session` and `synthesis.voices`; explicit `voice` on `voice_speak` |
 | 6 | 2026-11-26 | `playback.speak_subagents` (false); parent session mutes cover subagents |
+| 7 | 2026-11-26 | `output.retention.auto_purge_minutes` (30); sweeps run every 5 minutes |
 
 Rules:
 

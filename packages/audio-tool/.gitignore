@@ -54,3 +54,6 @@ plugin/node_modules/
 
 # Cross-host speech requests (shared folder bus)
 .voice-requests/
+
+# The workspace root owns dependency resolution; package builds install locally.
+plugin/package-lock.json
