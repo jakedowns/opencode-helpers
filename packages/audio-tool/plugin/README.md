@@ -290,6 +290,25 @@ different machine's heartbeat is younger than 15 s, so two active hosts are
 visible. Nothing disables them automatically: the queues are per machine, so if
 both synthesise they will both speak.
 
+## Playback controls
+
+While something is playing, the panel adds a **Pause/Play** button and a seek
+bar under the queue line, with elapsed/total time and the item label. The bar
+interpolates between the 2 s state polls, so it moves smoothly.
+
+- **Host**: `audioq.py` publishes `<queue>/.playing.json` every 0.5 s and polls
+  `<queue>/.playback-control.json`. Pause/resume uses `SIGSTOP`/`SIGCONT`; seek
+  trims the WAV with Python's `wave` module (no ffmpeg) and restarts the player
+  at that offset. Seeking while paused stays paused.
+- **Client with Play on this Mac**: the panel drives the local `afplay` process
+  directly, with the same pause and seek semantics (the cached WAV is trimmed
+  into a temporary file).
+- **Client without local playback**: actions are forwarded to the host through
+  `.voice-requests` (`kind: "playback"`), and the host publishes the playback
+  position in `.voice-state.json`.
+- The machine that owns the speaker must run the current server build; an older
+  host has no `.playing.json`, so the panel simply shows no playback row.
+
 ## Subagents
 
 A subagent is a session with a `parentID`. Auto-speak skips those by default

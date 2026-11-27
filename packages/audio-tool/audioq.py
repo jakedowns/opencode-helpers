@@ -46,6 +46,14 @@ DEFAULT_QUEUE_DIR = "/tmp/opencode/audio-replies/queue"
 DEFAULT_SOCK = "/tmp/opencode/audio-replies/piperd.sock"
 DEFAULT_PLAYER = "afplay" if sys.platform == "darwin" else "aplay -q"
 
+# Managed playback: the drainer publishes what it is playing and polls a small
+# control file, so the panel can pause/resume/seek without owning the process.
+CONTROL_NAME = ".playback-control.json"
+PROGRESS_NAME = ".playing.json"
+SEEK_DIR = ".seek"
+PLAYER_POLL = 0.1
+PROGRESS_INTERVAL = 0.5
+
 POLL_SECONDS = 0.25
 MAX_PLAYED = 100
 LOG_MAX_BYTES = 1024 * 1024
@@ -716,6 +724,81 @@ def _play_lock_paths(queue_dir):
     return sorted(paths)
 
 
+def _read_json_file(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            obj = json.load(f)
+        return obj if isinstance(obj, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def _progress_path(queue_dir):
+    """Where the currently-playing item is published.
+
+    `AUDIOQ_PROGRESS_FILE` lets a host write to the shared folder so clients
+    that cannot see its /tmp queue can still render the position.
+    """
+    return os.environ.get("AUDIOQ_PROGRESS_FILE") or os.path.join(queue_dir, PROGRESS_NAME)
+
+
+def _write_progress(path, payload):
+    try:
+        _write_json_atomic(path, payload)
+    except OSError:
+        pass
+
+
+def _trim_wav(src, start_seconds, dest):
+    """Write `src` from `start_seconds` to `dest`, header included."""
+    with wave.open(src, "rb") as reader:
+        params = reader.getparams()
+        rate = reader.getframerate()
+        total = reader.getnframes()
+        first = max(0, min(total, int(max(0.0, start_seconds) * rate)))
+        reader.setpos(first)
+        frames = total - first
+        with wave.open(dest, "wb") as writer:
+            writer.setparams(params)
+            writer.writeframes(reader.readframes(frames))
+    return frames / float(rate) if rate else 0.0
+
+
+def _stop_player(proc):
+    """Terminate a player that may be paused (SIGSTOP blocks SIGTERM)."""
+    try:
+        proc.send_signal(signal.SIGCONT)
+    except OSError:
+        pass
+    try:
+        proc.terminate()
+    except OSError:
+        pass
+    try:
+        proc.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        try:
+            proc.kill()
+            proc.wait(timeout=1)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+
+def _cleanup_seeks(queue_dir):
+    folder = os.path.join(queue_dir, SEEK_DIR)
+    try:
+        entries = list(os.scandir(folder))
+    except FileNotFoundError:
+        return
+    cutoff = time.time() - PART_MAX_AGE
+    for entry in entries:
+        try:
+            if entry.is_file(follow_symlinks=False) and entry.stat(follow_symlinks=False).st_mtime < cutoff:
+                _safe_unlink(entry.path)
+        except OSError:
+            continue
+
+
 def _play(queue_dir, wav, player, dry_run=False):
     if dry_run:
         return 0, ""
@@ -726,23 +809,147 @@ def _play(queue_dir, wav, player, dry_run=False):
     if not cmd:
         return 127, "no player configured"
 
+    control_path = os.path.join(queue_dir, CONTROL_NAME)
+    progress_path = _progress_path(queue_dir)
+    meta = _read_json_file(sidecar_path(wav)) or {}
+    try:
+        total = float(meta.get("seconds") or 0)
+    except (TypeError, ValueError):
+        total = 0.0
+    if total <= 0:
+        total = wav_seconds(wav) or 0.0
+    seek_dir = os.path.join(queue_dir, SEEK_DIR)
+
     fds = []
+    proc = None
+    temp = None
     try:
         for lock_path in _play_lock_paths(queue_dir):
             fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
             fds.append(fd)
         for fd in fds:
             fcntl.flock(fd, fcntl.LOCK_EX)
+
+        offset = 0.0
+        started = time.time()
+        paused_total = 0.0
+        paused_at = None
+        ack = 0.0
+        last_publish = 0.0
         try:
-            proc = subprocess.run(cmd + [wav], stdout=subprocess.DEVNULL,
-                                  stderr=subprocess.PIPE, text=True)
+            proc = subprocess.Popen(
+                cmd + [wav], stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE, text=True)
         except OSError as exc:
             return 127, str(exc)
-        if proc.returncode == 0:
+
+        while True:
+            rc = proc.poll()
+            now = time.time()
+            base = paused_at if paused_at is not None else now
+            position = offset + max(0.0, base - started - paused_total)
+            if total > 0:
+                position = min(position, total)
+            if now - last_publish >= PROGRESS_INTERVAL or rc is not None:
+                _write_progress(progress_path, {
+                    "at": int(now * 1000),
+                    "file": wav,
+                    "source": str(meta.get("source") or wav),
+                    "session": str(meta.get("session") or ""),
+                    "seconds": round(total, 3),
+                    "position": round(position, 3),
+                    "paused": paused_at is not None,
+                    "offset": round(offset, 3),
+                    "ack": int(ack),
+                })
+                last_publish = now
+            if rc is not None:
+                break
+
+            control = _read_json_file(control_path)
+            try:
+                stamp = float(control.get("at") or 0) if control else 0.0
+            except (TypeError, ValueError):
+                stamp = 0.0
+            if control and stamp > ack:
+                ack = stamp
+                action = str(control.get("action") or "")
+                if action == "pause" and paused_at is None:
+                    try:
+                        proc.send_signal(signal.SIGSTOP)
+                        paused_at = time.time()
+                    except OSError:
+                        pass
+                elif action == "resume" and paused_at is not None:
+                    try:
+                        proc.send_signal(signal.SIGCONT)
+                        paused_total += time.time() - paused_at
+                        paused_at = None
+                    except OSError:
+                        pass
+                elif action == "seek":
+                    try:
+                        target = float(control.get("position") or 0)
+                    except (TypeError, ValueError):
+                        target = 0.0
+                    target = max(0.0, min(total, target)) if total > 0 else max(0.0, target)
+                    was_paused = paused_at is not None
+                    _stop_player(proc)
+                    os.makedirs(seek_dir, exist_ok=True)
+                    if temp:
+                        _safe_unlink(temp)
+                    temp = os.path.join(
+                        seek_dir, f"seek-{os.getpid()}-{int(time.time() * 1000)}.wav")
+                    try:
+                        _trim_wav(wav, target, temp)
+                        proc = subprocess.Popen(
+                            cmd + [temp], stdout=subprocess.DEVNULL,
+                            stderr=subprocess.PIPE, text=True)
+                    except (OSError, wave.Error) as exc:
+                        # Seeking failed (foreign/odd WAV): restart from the top
+                        # rather than dropping the reply on the floor.
+                        _safe_unlink(temp)
+                        temp = None
+                        target = 0.0
+                        try:
+                            proc = subprocess.Popen(
+                                cmd + [wav], stdout=subprocess.DEVNULL,
+                                stderr=subprocess.PIPE, text=True)
+                        except OSError as exc2:
+                            return 127, f"seek failed ({exc}); restart failed ({exc2})"
+                    offset = target
+                    started = time.time()
+                    paused_total = 0.0
+                    paused_at = None
+                    if was_paused:
+                        # Seeking a paused reply keeps it paused at the new spot.
+                        try:
+                            proc.send_signal(signal.SIGSTOP)
+                            paused_at = time.time()
+                        except OSError:
+                            pass
+            time.sleep(PLAYER_POLL)
+
+        rc = proc.wait()
+        err = ""
+        try:
+            err = (proc.stderr.read() or "").strip()
+        except (OSError, ValueError):
+            pass
+        if rc == 0:
             return 0, ""
-        lines = (proc.stderr or "").strip().splitlines()
-        return proc.returncode, (lines[-1] if lines else f"exit {proc.returncode}")[:500]
+        lines = err.splitlines()
+        return rc, (lines[-1] if lines else f"exit {rc}")[:500]
     finally:
+        if temp:
+            _safe_unlink(temp)
+        _safe_unlink(progress_path)
+        # Commands are per-item; a leftover pause must not freeze the next one.
+        _safe_unlink(control_path)
+        try:
+            os.rmdir(seek_dir)
+        except OSError:
+            pass
         for fd in reversed(fds):
             try:
                 fcntl.flock(fd, fcntl.LOCK_UN)
@@ -783,6 +990,7 @@ def drain(queue_dir=None, player=None, once=False, dry_run=False, stop_event=Non
 
         try:
             _cleanup_orphans(queue_dir)
+            _cleanup_seeks(queue_dir)
             _recover_playing(queue_dir)
             _prune_played(queue_dir)
 

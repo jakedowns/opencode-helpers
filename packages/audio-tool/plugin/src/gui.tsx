@@ -49,6 +49,15 @@ type State = {
   clientPlayback?: { at: number; enabled: boolean }
   hostHeartbeat?: { machine: string; at: number }
   otherHost?: { machine: string; at: number }
+  playback?: {
+    at: number
+    file?: string
+    session?: string
+    seconds: number
+    position: number
+    paused: boolean
+    source: "local" | "host"
+  }
   log?: Array<{ at: string; kind: string; status: string; detail?: string }>
 }
 
@@ -87,6 +96,10 @@ function age(at: number): string {
 function AudioPanel(props: { session: Session }) {
   const ctx = usePlugin()
   const [state, setState] = createSignal<State | undefined>()
+  // Redeem the position without a server round trip: state polls every 2 s,
+  // but the seek bar should move every half second.
+  const [clock, setClock] = createSignal(Date.now())
+  const [seekValue, setSeekValue] = createSignal<number | null>(null)
 
   const fail = (action: string, error: unknown) => {
     ctx.toast.show({
@@ -120,7 +133,11 @@ function AudioPanel(props: { session: Session }) {
   onMount(() => {
     void refresh()
     const timer = setInterval(() => void refresh(), 2_000)
-    onCleanup(() => clearInterval(timer))
+    const clockTimer = setInterval(() => setClock(Date.now()), 500)
+    onCleanup(() => {
+      clearInterval(timer)
+      clearInterval(clockTimer)
+    })
   })
 
   const replay = (file: string) =>
@@ -200,6 +217,31 @@ function AudioPanel(props: { session: Session }) {
       .clearLog({ directory: props.session.directory, sessionID: props.session.id })
       .then((next: unknown) => applyState(next as State))
       .catch((error) => fail("clear log", error))
+
+  const playbackAction = (action: "pause" | "resume" | "seek", position?: number) =>
+    ctx.client
+      .rpc(Voice)
+      .playback({
+        directory: props.session.directory,
+        sessionID: props.session.id,
+        action,
+        ...(typeof position === "number" ? { position } : {}),
+      })
+      .then((next: unknown) => applyState(next as State))
+      .catch((error) => fail("playback", error))
+
+  const playback = () => state()?.playback
+  const playbackPosition = () => {
+    const p = playback()
+    if (!p) return 0
+    if (p.paused) return p.position
+    return Math.min(p.seconds, p.position + Math.max(0, (clock() - p.at) / 1000))
+  }
+  const shownPosition = () => seekValue() ?? playbackPosition()
+  const formatTime = (seconds: number) => {
+    const whole = Math.max(0, Math.floor(seconds))
+    return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`
+  }
 
   const purgeText = () => {
     const last = state()?.lastPurge
@@ -368,6 +410,60 @@ function AudioPanel(props: { session: Session }) {
             : state()?.lastSpeaker
               ? ` · latest: ${state()?.lastSpeaker?.session}`
               : ""}
+        </div>
+      </Show>
+      <Show when={playback()}>
+        <div style={{ display: "flex", "flex-direction": "column", gap: "4px" }}>
+          <div style={{ display: "flex", "align-items": "center", gap: "8px" }}>
+            <button
+              type="button"
+              className="voice-btn"
+              aria-pressed={playback()?.paused === true}
+              title={playback()?.paused ? "Resume playback" : "Pause playback"}
+              onClick={() => void playbackAction(playback()?.paused ? "resume" : "pause")}
+            >
+              {playback()?.paused ? "Play" : "Pause"}
+            </button>
+            <input
+              type="range"
+              min="0"
+              max={Math.max(1, playback()?.seconds ?? 0)}
+              step="0.1"
+              value={shownPosition()}
+              onInput={(event) => setSeekValue(Number(event.currentTarget.value))}
+              onChange={(event) => {
+                const value = Number(event.currentTarget.value)
+                setSeekValue(null)
+                void playbackAction("seek", value)
+              }}
+              style={{ flex: "1 1 auto", "min-width": "0" }}
+            />
+            <span
+              style={{
+                opacity: 0.7,
+                "font-variant-numeric": "tabular-nums",
+                "min-width": "9ch",
+                "text-align": "right",
+              }}
+            >
+              {formatTime(shownPosition())} / {formatTime(playback()?.seconds ?? 0)}
+            </span>
+          </div>
+          <div
+            style={{
+              opacity: 0.6,
+              overflow: "hidden",
+              "text-overflow": "ellipsis",
+              "white-space": "nowrap",
+            }}
+          >
+            {playback()?.source === "host" ? "playing on the host" : "playing on this machine"}
+            {playback()?.session
+              ? ` · ${playback()?.session}`
+              : playback()?.file
+                ? ` · ${playback()?.file?.split("/").pop()}`
+                : ""}
+          </div>
         </div>
       </Show>
       <Show when={state()?.stats}>

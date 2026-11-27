@@ -189,6 +189,10 @@ private, expiring link; put that link inline in the reply.
   `audioq.py clear --failed`.
 - Several agents may produce at once; that is safe. Just do not share one
   output WAV path across concurrent replies.
+- `<queue>/.playing.json` is the drainer's progress report and
+  `<queue>/.playback-control.json` is the panel's command channel (pause,
+  resume, seek). Neither is a queue item: do not hand-edit them while
+  debugging playback; the drainer owns both.
 
 ## 7. Gotchas
 

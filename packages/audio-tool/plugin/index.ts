@@ -40,6 +40,7 @@ import {
   writeModeOverride,
   setHostHeartbeat,
   clearLog,
+  setPlayback,
   setMute,
   setPurgeAttempt,
   setQueue,
@@ -48,6 +49,7 @@ import {
   setSidebar,
   recordVoiceEvent,
   type ModeOverride,
+  type Playback,
   type VoiceStats,
 } from "./state.ts"
 import { Voice } from "./rpc.ts"
@@ -484,45 +486,252 @@ function localOutputDir(root: string, configured: string): string {
   return mapSharedPath(root, hostOptions.sharedRoot, configured) ?? configured
 }
 
-/** Client mode: copy new replies into a local cache and play them with afplay. */
+type LocalPlayer = {
+  child: any
+  file: string
+  cacheFile: string
+  session?: string
+  seconds: number
+  startedAt: number
+  offset: number
+  paused: boolean
+  pausedAt?: number
+  pausedTotal: number
+  generation: number
+  entryAt: number
+  temp?: string
+}
+
+let localPlayer: LocalPlayer | null = null
+let localControl:
+  | ((action: "pause" | "resume" | "seek" | "stop", position?: number) => void)
+  | null = null
+
+/** Cut a PCM WAV at `startSeconds` so seeking needs no external player. */
+function trimWav(src: string, dest: string, startSeconds: number): boolean {
+  try {
+    const buf = readFileSync(src)
+    if (buf.length < 44 || buf.toString("ascii", 0, 4) !== "RIFF") return false
+    let off = 12
+    let dataStart = -1
+    let dataLen = 0
+    while (off + 8 <= buf.length) {
+      const id = buf.toString("ascii", off, off + 4)
+      const size = buf.readUInt32LE(off + 4)
+      if (id === "data") {
+        dataStart = off + 8
+        dataLen = Math.min(size, buf.length - dataStart)
+        break
+      }
+      off += 8 + size + (size & 1)
+    }
+    if (dataStart < 0 || dataLen <= 0) return false
+    const channels = buf.readUInt16LE(22)
+    const rate = buf.readUInt32LE(24)
+    const bits = buf.readUInt16LE(34)
+    const blockAlign = Math.max(1, Math.floor((channels * Math.max(8, bits)) / 8))
+    let skip = Math.floor(Math.max(0, startSeconds) * rate * blockAlign)
+    skip -= skip % blockAlign
+    skip = Math.max(0, Math.min(skip, dataLen))
+    const header = Buffer.from(buf.subarray(0, dataStart))
+    header.writeUInt32LE(dataLen - skip, dataStart - 4)
+    header.writeUInt32LE(header.length - 8 + (dataLen - skip), 4)
+    writeFileSync(dest, Buffer.concat([header, buf.subarray(dataStart + skip, dataStart + dataLen)]))
+    return true
+  } catch (error) {
+    log("seek trim failed", String(error))
+    return false
+  }
+}
+
+function localPlaybackInfo(): Playback | null {
+  const p = localPlayer
+  if (!p) return null
+  const now = Date.now()
+  const elapsed = ((p.paused && p.pausedAt ? p.pausedAt : now) - p.startedAt - p.pausedTotal) / 1000
+  const position = Math.max(0, p.offset + Math.max(0, elapsed))
+  const info: Playback = {
+    at: now,
+    seconds: p.seconds,
+    position: p.seconds > 0 ? Math.min(p.seconds, position) : position,
+    paused: p.paused,
+    source: "local",
+  }
+  if (p.file) info.file = p.file
+  if (p.session) info.session = p.session
+  return info
+}
+
+/** Client mode: copy new replies into a local cache and play them one at a time. */
 function startClientPlayback(ctx: any, root: string, opts: Options): () => void {
   const cacheDir = opts.cacheDir || path.join(homedir(), ".cache", "opencode-audio-tool")
   const player = playerArgv(playerFor(opts))
   const key = "voiceClientLastAt"
-  let busy = false
-  const timer = setInterval(() => {
-    void (async () => {
-      const state = readState(root)
-      if (!readClientPlayback(root).enabled || busy) return
-      busy = true
+  let stopped = false
+
+  const finalize = (p: LocalPlayer, generation: number) => {
+    if (localPlayer !== p || p.generation !== generation) return
+    localPlayer = null
+    if (p.temp) {
       try {
-        let last = Number((await ctx.storage.get(key)) ?? 0)
-        const entries = readIndex(root, 50).filter((entry) => entry.at > last).sort((a, b) => a.at - b.at)
-        for (const entry of entries) {
-          const local = mapSharedPath(root, opts.sharedRoot, entry.path)
-          if (!local) {
-            logAction(root, "play", "error", `cannot map ${entry.path}`)
-            last = entry.at
-            continue
-          }
-          mkdirSync(cacheDir, { recursive: true })
-          const dest = path.join(cacheDir, path.basename(local))
-          if (!existsSync(dest)) copyFileSync(local, dest)
-          const child = spawn(player[0], [...player.slice(1), dest], { detached: true, stdio: "ignore" })
-          child.on("error", (error) => logAction(root, "play", "error", String(error)))
-          child.unref()
-          logAction(root, "play", "ok", path.basename(dest))
-          last = entry.at
-          await ctx.storage.set(key, last)
+        unlinkSync(p.temp)
+      } catch {
+        /* already gone */
+      }
+    }
+    void ctx.storage.set(key, p.entryAt)
+  }
+
+  const start = (entry: IndexEntry, cacheFile: string) => {
+    const child = spawn(player[0], [...player.slice(1), cacheFile], { detached: true, stdio: "ignore" })
+    child.unref()
+    const p: LocalPlayer = {
+      child,
+      file: entry.path,
+      cacheFile,
+      seconds: Number(entry.seconds) || 0,
+      startedAt: Date.now(),
+      offset: 0,
+      paused: false,
+      pausedTotal: 0,
+      generation: 0,
+      entryAt: entry.at,
+    }
+    if (entry.session) p.session = entry.session
+    localPlayer = p
+    child.on("error", (error) => {
+      logAction(root, "play", "error", String(error))
+      finalize(p, 0)
+    })
+    child.on("close", () => finalize(p, 0))
+    logAction(root, "play", "ok", path.basename(cacheFile))
+  }
+
+  const control = (action: "pause" | "resume" | "seek" | "stop", position?: number) => {
+    const p = localPlayer
+    if (!p) return
+    if (action === "pause" && !p.paused) {
+      try {
+        p.child.kill("SIGSTOP")
+      } catch {
+        /* already gone */
+      }
+      p.paused = true
+      p.pausedAt = Date.now()
+      return
+    }
+    if (action === "resume" && p.paused) {
+      try {
+        p.child.kill("SIGCONT")
+      } catch {
+        /* already gone */
+      }
+      p.pausedTotal += Date.now() - (p.pausedAt ?? Date.now())
+      p.paused = false
+      p.pausedAt = undefined
+      return
+    }
+    if (action === "stop") {
+      try {
+        p.child.kill("SIGCONT")
+        p.child.kill("SIGTERM")
+      } catch {
+        /* ignore */
+      }
+      return
+    }
+    if (action === "seek") {
+      const target = Math.max(
+        0,
+        Math.min(p.seconds > 0 ? p.seconds : Number.POSITIVE_INFINITY, Number(position) || 0),
+      )
+      const wasPaused = p.paused
+      try {
+        p.child.kill("SIGCONT")
+        p.child.kill("SIGTERM")
+      } catch {
+        /* ignore */
+      }
+      mkdirSync(cacheDir, { recursive: true })
+      let temp: string | undefined = path.join(
+        cacheDir,
+        `.seek-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}.wav`,
+      )
+      let source = temp
+      let offset = target
+      if (!trimWav(p.cacheFile, temp, target)) {
+        logAction(root, "seek", "error", "not a WAV; restarting from the top")
+        temp = undefined
+        source = p.cacheFile
+        offset = 0
+      }
+      if (p.temp) {
+        try {
+          unlinkSync(p.temp)
+        } catch {
+          /* already gone */
         }
+      }
+      const generation = ++p.generation
+      const child = spawn(player[0], [...player.slice(1), source], { detached: true, stdio: "ignore" })
+      child.unref()
+      p.child = child
+      p.temp = temp
+      p.offset = offset
+      p.startedAt = Date.now()
+      p.pausedTotal = 0
+      p.paused = wasPaused
+      p.pausedAt = wasPaused ? Date.now() : undefined
+      if (wasPaused) {
+        try {
+          child.kill("SIGSTOP")
+        } catch {
+          /* ignore */
+        }
+      }
+      child.on("error", (error) => {
+        logAction(root, "play", "error", String(error))
+        finalize(p, generation)
+      })
+      child.on("close", () => finalize(p, generation))
+    }
+  }
+
+  const tick = () => {
+    void (async () => {
+      if (stopped || localPlayer) return
+      if (!readClientPlayback(root).enabled) return
+      try {
+        const last = Number((await ctx.storage.get(key)) ?? 0)
+        const entry = readIndex(root, 50)
+          .filter((item) => item.at > last)
+          .sort((a, b) => a.at - b.at)[0]
+        if (!entry) return
+        const local = mapSharedPath(root, opts.sharedRoot, entry.path)
+        if (!local) {
+          logAction(root, "play", "error", `cannot map ${entry.path}`)
+          await ctx.storage.set(key, entry.at)
+          return
+        }
+        mkdirSync(cacheDir, { recursive: true })
+        const dest = path.join(cacheDir, path.basename(local))
+        if (!existsSync(dest)) copyFileSync(local, dest)
+        start(entry, dest)
       } catch (error) {
         logAction(root, "play", "error", String(error))
-      } finally {
-        busy = false
       }
     })()
-  }, 2000)
-  return () => clearInterval(timer)
+  }
+
+  tick()
+  const timer = setInterval(tick, 2000)
+  localControl = control
+  return () => {
+    stopped = true
+    clearInterval(timer)
+    if (localControl === control) localControl = null
+    control("stop")
+  }
 }
 
 function formatBytes(bytes: number): string {
@@ -824,6 +1033,55 @@ async function speakSummary(
 
 function queueDirectory(): string {
   return queueDirPath
+}
+
+/** The host drainer publishes `<queue>/.playing.json` every 0.5 s. */
+function hostPlayback(): Playback | null {
+  try {
+    const raw = JSON.parse(readFileSync(path.join(queueDirPath, ".playing.json"), "utf8")) as {
+      at?: number
+      file?: string
+      source?: string
+      session?: string
+      seconds?: number
+      position?: number
+      paused?: boolean
+    }
+    const seconds = Number(raw.seconds) || 0
+    if (!(seconds > 0)) return null
+    const info: Playback = {
+      at: Number(raw.at) || Date.now(),
+      seconds,
+      position: Math.max(0, Math.min(seconds, Number(raw.position) || 0)),
+      paused: raw.paused === true,
+      source: "local",
+    }
+    const file = raw.source || raw.file
+    if (file) info.file = file
+    if (typeof raw.session === "string" && raw.session) info.session = raw.session
+    return info
+  } catch {
+    return null
+  }
+}
+
+/** Host side of the panel controls; the drainer polls and applies this file. */
+function writePlaybackControl(action: string, position?: number): void {
+  const file = path.join(queueDirPath, ".playback-control.json")
+  const payload: Record<string, unknown> = { action, at: Date.now() }
+  if (typeof position === "number" && Number.isFinite(position)) payload.position = position
+  const tmp = `${file}.${process.pid}.part`
+  try {
+    writeFileSync(tmp, `${JSON.stringify(payload)}\n`)
+    renameSync(tmp, file)
+  } catch (error) {
+    log("playback control write failed", String(error))
+    try {
+      unlinkSync(tmp)
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 /** The queue's played archive keeps WAVs; reuse one when the basename matches. */
@@ -1358,6 +1616,7 @@ async function voiceState(
     lastAttempt?: { at: number; removed: number; bytes: number }
     hostHeartbeat?: { machine: string; at: number }
     otherHost?: { machine: string; at: number }
+    playback?: Playback
   } = {
     entries,
     mutes: resolveMutes(state, directory, sessionID),
@@ -1387,6 +1646,13 @@ async function voiceState(
   if (state.lastPurge) result.lastPurge = state.lastPurge
   if (state.lastAttempt) result.lastAttempt = state.lastAttempt
   if (state.hostHeartbeat) result.hostHeartbeat = state.hostHeartbeat
+  {
+    const local = mode === "client" ? localPlaybackInfo() : hostPlayback()
+    if (local) result.playback = local
+    else if (mode === "client" && state.playback) {
+      result.playback = { ...state.playback, source: "host" }
+    }
+  }
   {
     const self = hostname()
     const now = Date.now()
@@ -1476,6 +1742,8 @@ function startRequestWatcher(root: string, location: string): () => void {
             child?: boolean
             days?: number
             path?: string
+            action?: string
+            position?: number
           }
           if (request.kind === "purge") {
             const days = typeof request.days === "number" ? request.days : undefined
@@ -1506,6 +1774,26 @@ function startRequestWatcher(root: string, location: string): () => void {
               /* sweep will clean it */
             }
             log("volume request served")
+            continue
+          }
+          if (request.kind === "playback" && request.action) {
+            const action =
+              request.action === "pause" || request.action === "resume" || request.action === "seek"
+                ? request.action
+                : undefined
+            if (action) {
+              const position =
+                typeof request.position === "number" && Number.isFinite(request.position)
+                  ? Math.max(0, request.position)
+                  : undefined
+              writePlaybackControl(action, position)
+              log(`playback request served (${action})`)
+            }
+            try {
+              unlinkSync(claim)
+            } catch {
+              /* sweep will clean it */
+            }
             continue
           }
           if (request.kind === "remove" && request.path) {
@@ -1634,6 +1922,7 @@ export default Plugin.define({
           const usage = cacheUsage()
           setCache(root, usage.files, usage.bytes)
           setQueue(root, queueCounts())
+          setPlayback(root, hostPlayback())
           setGenerating(root, activeSpeak + processingCount(root))
           setAudio(root, await audioStatus())
         })().catch((error) => log("stats refresh failed", String(error)))
@@ -1680,6 +1969,7 @@ export default Plugin.define({
       modeStopper?.()
       modeStopper = undefined
       const previous = mode
+      if (previous === "host" && next !== "host") setPlayback(root, null)
       mode = next
       activeMode = next
       if (next === "host") {
@@ -1811,6 +2101,7 @@ export default Plugin.define({
           const args = (input ?? {}) as { enabled?: boolean; directory?: string; sessionID?: string }
           writeClientPlayback(root, args.enabled === true)
           if (args.enabled === true) await ctx.storage.set("voiceClientLastAt", Date.now())
+          else localControl?.("stop")
           return await voiceState(root, args.directory ?? location, args.sessionID, mode)
         },
         setMode: async (input: unknown) => {
@@ -1842,6 +2133,37 @@ export default Plugin.define({
           const detail = `cleared ${removed} line${removed === 1 ? "" : "s"}`
           setLastAction(root, "log", "ok", detail)
           log(`${detail} from .voice-log.jsonl`)
+          return await voiceState(root, args.directory ?? location, args.sessionID, mode)
+        },
+        playback: async (input: unknown) => {
+          const args = (input ?? {}) as {
+            action?: string
+            position?: number
+            directory?: string
+            sessionID?: string
+          }
+          const action =
+            args.action === "pause" || args.action === "resume" || args.action === "seek"
+              ? args.action
+              : "pause"
+          const position =
+            typeof args.position === "number" && Number.isFinite(args.position)
+              ? Math.max(0, args.position)
+              : undefined
+          if (action === "seek" && position === undefined) {
+            throw new Error("playback seek needs a position")
+          }
+          if (mode === "host") {
+            writePlaybackControl(action, position)
+            // Give the drainer's 100 ms poll time to apply before reporting.
+            await new Promise((resolve) => setTimeout(resolve, 250))
+          } else if (mode === "client" && localPlayer) {
+            localControl?.(action, position)
+          } else {
+            // Client without a local player: the host owns the sound device.
+            writeControl(root, { kind: "playback", action, position })
+            await new Promise((resolve) => setTimeout(resolve, 300))
+          }
           return await voiceState(root, args.directory ?? location, args.sessionID, mode)
         },
         setVolume: async (input: unknown) => {

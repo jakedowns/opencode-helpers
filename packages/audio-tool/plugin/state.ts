@@ -26,6 +26,15 @@ export type Generating = { at: number; count: number }
 export type ClientPlayback = { at: number; enabled: boolean }
 export type LastAction = { at: number; kind: string; status: "running" | "ok" | "empty" | "error"; detail?: string }
 export type HostHeartbeat = { machine: string; at: number }
+export type Playback = {
+  at: number
+  file?: string
+  session?: string
+  seconds: number
+  position: number
+  paused: boolean
+  source: "local" | "host"
+}
 export type Mode = "auto" | "host" | "client"
 export type ModeOverride = { at: number; mode: Mode }
 
@@ -60,6 +69,7 @@ export type VoiceState = {
   stats?: VoiceStats
   hostHeartbeat?: HostHeartbeat
   hosts?: Record<string, number>
+  playback?: Playback
 }
 
 const EMPTY: VoiceState = { global: false, projects: {}, sessions: {}, sidebar: true }
@@ -172,6 +182,22 @@ export function readState(root: string): VoiceState {
                 .filter(([, at]) => typeof at === "number" && Number.isFinite(at))
                 .map(([machine, at]) => [machine, Number(at)]),
             )
+          : undefined,
+      playback:
+        parsed?.playback && typeof parsed.playback.at === "number"
+          ? {
+              at: Number(parsed.playback.at),
+              seconds: Number(parsed.playback.seconds) || 0,
+              position: Number(parsed.playback.position) || 0,
+              paused: parsed.playback.paused === true,
+              source: parsed.playback.source === "host" ? "host" : "local",
+              ...(typeof parsed.playback.file === "string" && parsed.playback.file
+                ? { file: parsed.playback.file }
+                : {}),
+              ...(typeof parsed.playback.session === "string" && parsed.playback.session
+                ? { session: parsed.playback.session }
+                : {}),
+            }
           : undefined,
     }
   } catch {
@@ -471,5 +497,13 @@ export function setHostHeartbeat(root: string, machine: string): VoiceState {
     if (now - at > HEARTBEAT_KEEP_MS) delete hosts[name]
   }
   state.hosts = hosts
+  return writeState(root, state)
+}
+
+/** Publish (or clear) the item a host's drainer is currently playing. */
+export function setPlayback(root: string, playback: Playback | null): VoiceState {
+  const state = readState(root)
+  if (playback) state.playback = playback
+  else delete state.playback
   return writeState(root, state)
 }
