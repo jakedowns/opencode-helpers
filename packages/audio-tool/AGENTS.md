@@ -114,6 +114,7 @@ future agent can tell whether a local copy still matches this repo.
 | 5 | 2026-11-26 | `synthesis.voice_per_session` and `synthesis.voices`; explicit `voice` on `voice_speak` |
 | 6 | 2026-11-26 | `playback.speak_subagents` (false); parent session mutes cover subagents |
 | 7 | 2026-11-26 | `output.retention.auto_purge_minutes` (30); sweeps run every 5 minutes |
+| 8 | 2026-11-26 | `output.format: auto` (home = WAV, no encode); `link_format` m4a/96k for away; replay reuses archived WAV |
 
 Rules:
 

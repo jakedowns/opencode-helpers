@@ -167,9 +167,12 @@ type SpeakResult = {
 }
 
 type ReplyConfig = {
+  profiles?: { active?: string }
   output?: {
     directory?: string
-    format?: "mp3" | "wav"
+    format?: "auto" | "mp3" | "m4a" | "wav"
+    link_format?: "mp3" | "m4a"
+    link_bitrate?: string
     mp3_bitrate?: string
     ffmpeg?: string
     retention?: {
@@ -238,7 +241,8 @@ function removeReplyWavs(dir: string, maxAgeMs: number, maxFiles?: number): { re
   let names: string[] = []
   try {
     names = readdirSync(dir).filter(
-      (name) => name.startsWith("reply-") && (name.endsWith(".wav") || name.endsWith(".mp3")),
+      (name) =>
+        name.startsWith("reply-") && (name.endsWith(".wav") || name.endsWith(".mp3") || name.endsWith(".m4a")),
     )
   } catch {
     return { removed: 0, bytes: 0 }
@@ -421,6 +425,15 @@ function pickLastAssistant(messages: any[]): { id: string; text: string } | null
   return null
 }
 
+/** Link format: home keeps WAV (no encode at all); away/link mode encodes. */
+function effectiveFormat(config: ReplyConfig): "wav" | "mp3" | "m4a" {
+  const requested = config.output?.format ?? "auto"
+  if (requested !== "auto") return requested
+  const profile = (config.profiles?.active ?? "home").toLowerCase()
+  if (profile !== "away") return "wav"
+  return config.output?.link_format ?? "m4a"
+}
+
 let activeSpeak = 0
 
 function processingCount(root: string): number {
@@ -514,27 +527,62 @@ async function speakSummary(
   return result
 }
 
-/** Re-enqueue an existing reply. MP3s are transcoded to a temp WAV because the
- * queue and aplay only speak WAV. */
+function queueDirectory(): string {
+  return process.env.AUDIOQ_DIR || "/tmp/opencode/audio-replies/queue"
+}
+
+/** The queue's played archive keeps WAVs; reuse one when the basename matches. */
+function findPlayedWav(file: string): string | null {
+  const dir = path.join(queueDirectory(), "played")
+  const base = path.basename(file).replace(/\.(wav|mp3|m4a)$/i, "")
+  try {
+    for (const name of readdirSync(dir).filter((entry) => entry.endsWith(".json"))) {
+      const data = JSON.parse(readFileSync(path.join(dir, name), "utf8")) as { source?: string }
+      const source = typeof data.source === "string" ? data.source : ""
+      if (!source) continue
+      if (path.basename(source).replace(/\.(wav|mp3|m4a)$/i, "") !== base) continue
+      const wav = path.join(dir, name.replace(/\.json$/, ".wav"))
+      if (existsSync(wav)) return wav
+    }
+  } catch {
+    /* no archive */
+  }
+  return null
+}
+
+/** Re-enqueue an existing reply. WAVs go straight in; encoded links reuse the
+ * queue's played WAV when it is still archived, and only transcode otherwise. */
 async function replayFile(root: string, cwd: string, target: string): Promise<boolean> {
   const file = path.resolve(target)
   if (!existsSync(file)) return false
   const entry = readIndex(root, 500).find((item) => path.resolve(item.path) === file)
   let wav = file
   let tmp: string | undefined
-  if (/\.mp3$/i.test(file)) {
-    const config = await readConfig(root, cwd)
-    const ffmpeg = config.output?.ffmpeg || process.env.FFMPEG || "/media/share/tmp/tools/ffmpeg/ffmpeg"
-    tmp = path.join("/tmp/opencode/audio-replies", `replay-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}.wav`)
-    const convert = await run(ffmpeg, ["-y", "-hide_banner", "-loglevel", "error", "-i", file, "-acodec", "pcm_s16le", tmp], {
-      cwd,
-      timeoutMs: 60_000,
-    })
-    if (convert.code !== 0 || !existsSync(tmp)) {
-      log("replay transcode failed", convert.stderr.slice(0, 200))
-      return false
+  if (!/\.wav$/i.test(file)) {
+    const archived = findPlayedWav(file)
+    if (archived) {
+      wav = archived
+    } else {
+      const config = await readConfig(root, cwd)
+      const ffmpeg = config.output?.ffmpeg || process.env.FFMPEG || "/media/share/tmp/tools/ffmpeg/ffmpeg"
+      tmp = path.join("/tmp/opencode/audio-replies", `replay-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}.wav`)
+      const convert = await run(ffmpeg, ["-y", "-hide_banner", "-loglevel", "error", "-i", file, "-acodec", "pcm_s16le", tmp], {
+        cwd,
+        timeoutMs: 60_000,
+      })
+      if (convert.code !== 0 || !existsSync(tmp)) {
+        log("replay transcode failed", convert.stderr.slice(0, 200))
+        if (tmp) {
+          try {
+            unlinkSync(tmp)
+          } catch {
+            /* ignore */
+          }
+        }
+        return false
+      }
+      wav = tmp
     }
-    wav = tmp
   }
   const args = [path.join(root, "audioq.py"), "enqueue", wav, "--text", ""]
   if (entry?.session) args.push("--session", entry.session)
@@ -560,7 +608,7 @@ function removeEntry(root: string, target: string): boolean {
   const file = path.resolve(target)
   const entries = readIndex(root, 500)
   if (!entries.some((entry) => path.resolve(entry.path) === file)) return false
-  const base = file.replace(/\.(wav|mp3)$/i, "")
+  const base = file.replace(/\.(wav|mp3|m4a)$/i, "")
   for (const candidate of new Set([`${base}.wav`, `${base}.mp3`, file])) {
     try {
       unlinkSync(candidate)
@@ -629,29 +677,33 @@ async function speakDurableInner(
   } catch {
     throw new Error(`audioq enqueue returned no JSON: ${line.slice(0, 200)}`)
   }
-  const format = config.output?.format ?? "mp3"
+  const format = effectiveFormat(config)
   let linkFile = outFile
   let via = "piper+enqueue"
-  if (format === "mp3") {
-    const mp3 = outFile.replace(/\.wav$/, ".mp3")
+  if (format !== "wav") {
+    const encoded = outFile.replace(/\.wav$/, format === "m4a" ? ".m4a" : ".mp3")
     const ffmpeg =
       config.output?.ffmpeg || process.env.FFMPEG || "/media/share/tmp/tools/ffmpeg/ffmpeg"
-    const bitrate = config.output?.mp3_bitrate || "128k"
+    const bitrate =
+      config.output?.link_bitrate || (format === "m4a" ? "96k" : config.output?.mp3_bitrate || "128k")
+    const codec = format === "m4a"
+      ? ["-c:a", "aac", "-b:a", bitrate, "-movflags", "+faststart"]
+      : ["-codec:a", "libmp3lame", "-b:a", bitrate]
     const convert = await run(
       ffmpeg,
-      ["-y", "-hide_banner", "-loglevel", "error", "-i", outFile, "-codec:a", "libmp3lame", "-b:a", bitrate, mp3],
+      ["-y", "-hide_banner", "-loglevel", "error", "-i", outFile, ...codec, encoded],
       { cwd, timeoutMs: 60_000 },
     )
-    if (convert.code === 0 && existsSync(mp3) && statSync(mp3).size > 0) {
-      linkFile = mp3
-      via = "piper+mp3+enqueue"
+    if (convert.code === 0 && existsSync(encoded) && statSync(encoded).size > 0) {
+      linkFile = encoded
+      via = `piper+${format}+enqueue`
       try {
         unlinkSync(outFile) // the queue holds its own link or copy
       } catch {
         /* keep the wav if SMB still holds it */
       }
     } else {
-      log("mp3 transcode failed; keeping wav", convert.stderr.slice(0, 200))
+      log(`${format} transcode failed; keeping wav`, convert.stderr.slice(0, 200))
     }
   }
   {
@@ -900,7 +952,7 @@ function cacheUsage(_dir?: string): { files: number; bytes: number } {
     try {
       for (const name of readdirSync(dir)) {
         if (!name.startsWith("reply-")) continue
-        if (!name.endsWith(".wav") && !name.endsWith(".mp3")) continue
+        if (!name.endsWith(".wav") && !name.endsWith(".mp3") && !name.endsWith(".m4a")) continue
         try {
           const stat = statSync(path.join(dir, name))
           files += 1

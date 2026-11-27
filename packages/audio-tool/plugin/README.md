@@ -215,16 +215,23 @@ and `lessac-low.onnx` (2.916 s) differed.
 
 ## Format and retention
 
-Links default to **MP3** (`output.format`), because iOS Safari will not play a
-bare WAV reliably. Playback and the queue still use WAV: piper writes the WAV,
-`audioq.py` enqueues it, ffmpeg derives the MP3, and the WAV is unlinked once the
-queue owns its link. If ffmpeg is missing the plugin logs and links the WAV
-instead of failing.
+`output.format: "auto"` means **no encoding on the golden path**: a `home`
+profile keeps the WAV that piper wrote, links it, and never invokes ffmpeg. Only
+an `away` profile (sharing a link with another device) encodes, using
+`output.link_format` — **m4a/AAC 96k** by default, because iOS Safari will not
+play a bare WAV and AAC is ~30–40% smaller than MP3 at equal quality. MP3 stays
+available as `link_format`; explicit `format: "wav" | "mp3" | "m4a"` overrides
+`auto`. If the encoder fails, the plugin logs and links the WAV instead.
+
+Measured on one 3.7 s reply: WAV 163 KB, m4a 47 KB (AAC 103 kbps). AAC encoding
+uses more CPU than libmp3lame, but for a minute of speech it is under a second
+here — and only `away` links pay it.
 
 ```jsonc
 "output": {
-  "format": "mp3",              // or "wav"
-  "mp3_bitrate": "128k",
+  "format": "auto",             // auto: home=wav, away=link_format
+  "link_format": "m4a",         // or "mp3"
+  "link_bitrate": "96k",
   "ffmpeg": "/media/share/tmp/tools/ffmpeg/ffmpeg",
   "retention": {
     "auto_purge_minutes": 30,   // 0 disables automatic purging
@@ -235,6 +242,8 @@ instead of failing.
   }
 }
 ```
+
+Both `reply-*.mp3` and `reply-*.m4a` count as cached audio alongside WAV.
 
 A host sweeps every 5 minutes (and 30 s after start). `auto_purge_minutes`
 wins over `max_age_days` when it is smaller — the default is 30 minutes, so
@@ -292,9 +301,10 @@ global, project and session mutes in one click; when on, it mutes globally.
 The queue line names the session whose reply is playing, using `--session` on
 `audioq.py enqueue`. A client-supplied title is carried through the request file
 (`sessionTitle`) and used for both the preamble and the queue sidecar, so the
-Mac's session name survives the hop. Host stats refresh every 5 s. Clicking a row replays it: the host transcodes MP3 → temporary WAV, enqueues it
-with the original session title, and deletes the temp file once the queue owns
-it. Each row also has an **✕** that deletes that reply from disk and from the
+Mac's session name survives the hop. Host stats refresh every 5 s. Clicking a row replays it. A WAV reply is enqueued as-is. An encoded link
+prefers the queue's archived WAV (same basename, last 100 items) so replay is
+bit-exact and needs no ffmpeg; only after that archive is pruned is the link
+transcoded to a temporary WAV. Each row also has an **✕** that deletes that reply from disk and from the
 index (click it, not the row; it stops propagation). Only paths present in the
 index can be replayed or removed, and both `.wav`/`.mp3` variants of that
 basename go on delete. The TUI audio page supports the same row click.
