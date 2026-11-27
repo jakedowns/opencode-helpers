@@ -43,6 +43,7 @@ type State = {
   lastPurge?: Purge
   lastAttempt?: Purge
   lastAction?: { at: number; kind: string; status: "running" | "ok" | "empty" | "error"; detail?: string }
+  clientPlayback?: { at: number; enabled: boolean }
   log?: Array<{ at: string; kind: string; status: string; detail?: string }>
 }
 
@@ -283,6 +284,16 @@ function AudioPanel(props: { session: Session }) {
           {" | 24h "}{state()?.stats?.turns ?? 0} turns · {state()?.stats?.spoken ?? 0} spoken
           {" · "}{missedCount(state()?.stats)} missed
         </div>
+      </Show>
+      <Show when={state()?.mode === "client"}>
+        <label style={{ display: "flex", "align-items": "center", gap: "6px" }}>
+          <input
+            type="checkbox"
+            checked={state()?.clientPlayback?.enabled === true}
+            onChange={(event) => void setLocalPlayback(event.currentTarget.checked)}
+          />
+          Play on this Mac (local cache)
+        </label>
       </Show>
       <Show when={state()?.audio?.available}>
         <div style={{ display: "flex", "align-items": "center", gap: "8px" }}>

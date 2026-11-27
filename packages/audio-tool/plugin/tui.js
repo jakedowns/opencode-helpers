@@ -25,6 +25,7 @@ function readState(root) {
       projects: parsed?.projects && typeof parsed.projects === "object" ? parsed.projects : {},
       sessions: parsed?.sessions && typeof parsed.sessions === "object" ? parsed.sessions : {},
       sidebar: parsed?.sidebar !== false,
+      clientPlayback: parsed?.clientPlayback && typeof parsed.clientPlayback.at === "number" ? { at: parsed.clientPlayback.at, enabled: parsed.clientPlayback.enabled === true } : void 0,
       lastAction: parsed?.lastAction && typeof parsed.lastAction.at === "number" ? {
         at: parsed.lastAction.at,
         kind: String(parsed.lastAction.kind ?? ""),
@@ -208,6 +209,15 @@ var state = {
       required: ["at", "windowStart", "turns", "spoken", "skipped", "sessions"],
       additionalProperties: false
     },
+    clientPlayback: {
+      type: "object",
+      properties: {
+        at: { type: "number" },
+        enabled: { type: "boolean" }
+      },
+      required: ["at", "enabled"],
+      additionalProperties: false
+    },
     log: {
       type: "array",
       items: {
@@ -292,6 +302,18 @@ var Voice = rpc_exports.define({
           value: { type: "boolean" }
         },
         required: ["directory", "scope", "value"],
+        additionalProperties: false
+      },
+      output: state
+    },
+    setClientPlayback: {
+      input: {
+        type: "object",
+        properties: {
+          ...location,
+          enabled: { type: "boolean" }
+        },
+        required: ["enabled"],
         additionalProperties: false
       },
       output: state
@@ -565,8 +587,17 @@ var tui_default = Plugin.define({
         variant: "info"
       });
     };
+    let previousRoute;
     const openAudioTool = () => {
+      const current = ctx.ui.router.current();
+      if (current.type === "session") previousRoute = { type: "session", sessionID: current.sessionID };
+      else if (current.type === "home") previousRoute = { type: "home" };
       void ctx.ui.router.navigate({ type: "plugin", name: "voice" });
+    };
+    const goBack = () => {
+      const target = previousRoute ?? { type: "home" };
+      previousRoute = void 0;
+      void ctx.ui.router.navigate(target);
     };
     const statusLine = () => {
       const state2 = mutes2();
@@ -574,6 +605,21 @@ var tui_default = Plugin.define({
       return `session ${label(state2.session)} \xB7 project ${label(state2.project)} \xB7 global ${label(state2.global)}`;
     };
     const AudioToolPage = () => {
+      try {
+        ctx.keymap.layer(() => ({
+          mode: "global",
+          priority: 10,
+          commands: [
+            {
+              id: "assistant-voice.back",
+              title: "Back",
+              bind: "escape",
+              run: () => goBack()
+            }
+          ]
+        }));
+      } catch {
+      }
       const entries = readIndex(root, 12);
       const stored = readState(root);
       const cache = stored.cache;

@@ -22,6 +22,7 @@ export type QueueStats = {
 }
 export type LastSpeaker = { at: number; session: string }
 export type Generating = { at: number; count: number }
+export type ClientPlayback = { at: number; enabled: boolean }
 export type LastAction = { at: number; kind: string; status: "running" | "ok" | "empty" | "error"; detail?: string }
 
 export type VoiceSessionStats = {
@@ -68,6 +69,10 @@ export function readState(root: string): VoiceState {
       projects: parsed?.projects && typeof parsed.projects === "object" ? parsed.projects : {},
       sessions: parsed?.sessions && typeof parsed.sessions === "object" ? parsed.sessions : {},
       sidebar: parsed?.sidebar !== false,
+      clientPlayback:
+        parsed?.clientPlayback && typeof parsed.clientPlayback.at === "number"
+          ? { at: parsed.clientPlayback.at, enabled: parsed.clientPlayback.enabled === true }
+          : undefined,
       lastAction:
         parsed?.lastAction && typeof parsed.lastAction.at === "number"
           ? {
@@ -307,5 +312,11 @@ export function setLastAction(
     status,
     ...(detail ? { detail } : {}),
   }
+  return writeState(root, state)
+}
+
+export function setClientPlayback(root: string, enabled: boolean): VoiceState {
+  const state = readState(root)
+  state.clientPlayback = { at: Date.now(), enabled }
   return writeState(root, state)
 }

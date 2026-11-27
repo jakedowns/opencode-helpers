@@ -85,6 +85,15 @@ const state = {
       required: ["at", "windowStart", "turns", "spoken", "skipped", "sessions"],
       additionalProperties: false,
     },
+    clientPlayback: {
+      type: "object",
+      properties: {
+        at: { type: "number" },
+        enabled: { type: "boolean" },
+      },
+      required: ["at", "enabled"],
+      additionalProperties: false,
+    },
     log: {
       type: "array",
       items: {
@@ -171,6 +180,18 @@ export const Voice = Rpc.define({
           value: { type: "boolean" },
         },
         required: ["directory", "scope", "value"],
+        additionalProperties: false,
+      },
+      output: state,
+    },
+    setClientPlayback: {
+      input: {
+        type: "object",
+        properties: {
+          ...location,
+          enabled: { type: "boolean" },
+        },
+        required: ["enabled"],
         additionalProperties: false,
       },
       output: state,

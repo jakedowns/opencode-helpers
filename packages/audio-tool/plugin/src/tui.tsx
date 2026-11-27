@@ -145,8 +145,22 @@ export default Plugin.define({
       })
     }
 
+    // Previous non-voice route, captured by openAudioTool() for Escape.
+    let previousRoute: { type: "home" } | { type: "session"; sessionID: string } | undefined
+
     const openAudioTool = () => {
+      // Remember where the user came from so Escape can return there; "home"
+      // is the fallback when the tool was opened directly (e.g. after startup).
+      const current = ctx.ui.router.current()
+      if (current.type === "session") previousRoute = { type: "session", sessionID: current.sessionID }
+      else if (current.type === "home") previousRoute = { type: "home" }
       void ctx.ui.router.navigate({ type: "plugin", name: "voice" })
+    }
+
+    const goBack = () => {
+      const target = previousRoute ?? { type: "home" as const }
+      previousRoute = undefined
+      void ctx.ui.router.navigate(target)
     }
 
     const statusLine = () => {
@@ -156,6 +170,26 @@ export default Plugin.define({
     }
 
     const AudioToolPage = () => {
+      // The hint at the bottom is only true if we bind Escape ourselves: the
+      // router has no history stack. The layer lives exactly as long as this
+      // page, so Escape keeps interrupting sessions everywhere else.
+      try {
+        ctx.keymap.layer(() => ({
+          mode: "global",
+          priority: 10,
+          commands: [
+            {
+              id: "assistant-voice.back",
+              title: "Back",
+              bind: "escape",
+              run: () => goBack(),
+            },
+          ],
+        }))
+      } catch {
+        /* a TUI without keymap support keeps the on-screen hint only */
+      }
+
       const entries = readIndex(root, 12)
       const stored = readState(root)
       const cache = stored.cache

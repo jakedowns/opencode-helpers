@@ -9,9 +9,11 @@
  * every failure is logged and returned as tool content.
  */
 import { spawn } from "node:child_process"
+import { homedir } from "node:os"
 import {
   accessSync,
   closeSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   openSync,
@@ -31,6 +33,7 @@ import {
   resolveMutes,
   setAudio,
   setCache,
+  setClientPlayback,
   setMute,
   setPurgeAttempt,
   setQueue,
@@ -49,6 +52,9 @@ type Options = {
   mode?: Mode
   autoUnmute?: boolean
   speakSubagents?: boolean
+  sharedRoot?: string
+  cacheDir?: string
+  player?: string
   root?: string
   auto?: boolean
   maxChars?: number
@@ -318,6 +324,73 @@ function readRecentLog(root: string, limit = 12): Array<{ at: string; kind: stri
   } catch {
     return []
   }
+}
+
+function wavDuration(file: string): number {
+  try {
+    const header = readFileSync(file)
+    if (header.length < 44) return 0
+    const rate = header.readUInt32LE(24)
+    const channels = header.readUInt16LE(22)
+    const bits = header.readUInt16LE(34)
+    return (header.length - 44) / (rate * channels * Math.max(8, bits) / 8)
+  } catch {
+    return 0
+  }
+}
+
+/** Map a host path (/media/share/...) into this machine's view of the share. */
+function mapSharedPath(root: string, configured: string | undefined, target: string): string | null {
+  const base = "/media/share"
+  if (target !== base && !target.startsWith(`${base}/`)) return null
+  let localRoot = configured
+  if (!localRoot) {
+    const marker = "/opencode-helpers/packages/audio-tool"
+    if (!root.endsWith(marker)) return null
+    localRoot = root.slice(0, -marker.length) || "/"
+  }
+  return path.join(localRoot, target.slice(base.length + 1))
+}
+
+/** Client mode: copy new replies into a local cache and play them with afplay. */
+function startClientPlayback(ctx: any, root: string, opts: Options): () => void {
+  const cacheDir = opts.cacheDir || path.join(homedir(), ".cache", "opencode-audio-tool")
+  const player = opts.player || (process.platform === "darwin" ? "afplay" : "aplay")
+  const key = "voiceClientLastAt"
+  let busy = false
+  const timer = setInterval(() => {
+    void (async () => {
+      const state = readState(root)
+      if (!state.clientPlayback?.enabled || busy) return
+      busy = true
+      try {
+        let last = Number((await ctx.storage.get(key)) ?? 0)
+        const entries = readIndex(root, 50).filter((entry) => entry.at > last).sort((a, b) => a.at - b.at)
+        for (const entry of entries) {
+          const local = mapSharedPath(root, opts.sharedRoot, entry.path)
+          if (!local) {
+            logAction(root, "play", "error", `cannot map ${entry.path}`)
+            last = entry.at
+            continue
+          }
+          mkdirSync(cacheDir, { recursive: true })
+          const dest = path.join(cacheDir, path.basename(local))
+          if (!existsSync(dest)) copyFileSync(local, dest)
+          const child = spawn(player, [dest], { detached: true, stdio: "ignore" })
+          child.on("error", (error) => logAction(root, "play", "error", String(error)))
+          child.unref()
+          logAction(root, "play", "ok", path.basename(dest))
+          last = entry.at
+          await ctx.storage.set(key, last)
+        }
+      } catch (error) {
+        logAction(root, "play", "error", String(error))
+      } finally {
+        busy = false
+      }
+    })()
+  }, 2000)
+  return () => clearInterval(timer)
 }
 
 function formatBytes(bytes: number): string {
@@ -757,10 +830,14 @@ async function speakDurableInner(
   }
   const gen = (Date.now() - started) / 1000
 
+  const clientPlays = readState(root).clientPlayback?.enabled === true
+  const audioSeconds = wavDuration(outFile)
   const enqueueArgs = [path.join(root, "audioq.py"), "enqueue", outFile, "--text", spoken]
   if (resolvedTitle) enqueueArgs.push("--session", resolvedTitle)
-  let enq = await run("python3", enqueueArgs, { cwd })
-  if (enq.code !== 0 && /no such file/i.test(enq.stderr)) {
+  let enq = clientPlays
+    ? { code: 0, stdout: JSON.stringify({ seconds: Number(audioSeconds.toFixed(3)) }), stderr: "" }
+    : await run("python3", enqueueArgs, { cwd })
+  if (!clientPlays && enq.code !== 0 && /no such file/i.test(enq.stderr)) {
     // SMB writeback can lag the piper exit; give the file one more chance.
     await new Promise((resolve) => setTimeout(resolve, 400))
     if (await fileReady(outFile, 1000)) {
@@ -1126,6 +1203,7 @@ async function voiceState(
     lastSpeaker?: { at: number; session: string }
     lastAction?: { at: number; kind: string; status: string; detail?: string }
     log: Array<{ at: string; kind: string; status: string; detail?: string }>
+    clientPlayback?: { at: number; enabled: boolean }
     lastPurge?: { at: number; removed: number; bytes: number }
     lastAttempt?: { at: number; removed: number; bytes: number }
   } = {
@@ -1144,6 +1222,7 @@ async function voiceState(
     queue,
     log: readRecentLog(root),
   }
+  if (state.clientPlayback) result.clientPlayback = state.clientPlayback
   if (state.stats) result.stats = state.stats
   if (state.lastSpeaker) result.lastSpeaker = state.lastSpeaker
   if (state.lastAction) result.lastAction = state.lastAction
@@ -1335,6 +1414,9 @@ export default Plugin.define({
     log(`mode ${mode} (requested ${requestedMode}, platform ${process.platform})`)
 
     const cleanups: Array<() => void> = []
+    if (mode === "client") {
+      cleanups.push(startClientPlayback(ctx, root, options))
+    }
     if (mode === "host") {
       cleanups.push(startRequestWatcher(root, location))
       log("host mode: watching .voice-requests")
@@ -1478,6 +1560,12 @@ export default Plugin.define({
               throw error
             }
           }
+          return await voiceState(root, args.directory ?? location, args.sessionID, mode)
+        },
+        setClientPlayback: async (input: unknown) => {
+          const args = (input ?? {}) as { enabled?: boolean; directory?: string; sessionID?: string }
+          setClientPlayback(root, args.enabled === true)
+          if (args.enabled === true) await ctx.storage.set("voiceClientLastAt", Date.now())
           return await voiceState(root, args.directory ?? location, args.sessionID, mode)
         },
         setVolume: async (input: unknown) => {

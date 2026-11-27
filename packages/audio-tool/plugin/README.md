@@ -214,6 +214,27 @@ The build is also defensive about this share: piper's output is polled for up to
 2 s before enqueue, and a "no such file" enqueue is retried once, because SMB
 writeback can lag the process exit.
 
+## Playing on the client
+
+In client mode the panel gains **Play on this Mac (local cache)**. When on:
+
+1. the host still synthesises and writes the index entry, but skips enqueueing
+   (no VM playback, no duplicate audio);
+2. the client polls the shared index every 2 s, copies each new reply into
+   `~/.cache/opencode-audio-tool/` (override with the `cacheDir` option) and
+   plays it with `afplay` on macOS (`aplay` elsewhere, override with `player`);
+3. playback progress is recorded in the same `.voice-log.jsonl`
+   (`kind: "play"`), so failures are visible in the panel log.
+
+Path mapping assumes the Mac sees the share at `<sharedRoot>/opencode-helpers/
+packages/audio-tool`; set the plugin option `sharedRoot` (for example
+`/Users/you/share`) when the layout differs. Without a mapping the log records
+`cannot map <path>` instead of failing silently.
+
+This is playback-only: the host still does synthesis. Full local generation on
+the Mac (macOS piper binary + local drainer, so it works with the VM gone) is the
+next step and needs a per-machine piper path.
+
 ## Subagents
 
 A subagent is a session with a `parentID`. Auto-speak skips those by default
