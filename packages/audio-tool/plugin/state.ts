@@ -6,6 +6,7 @@
  * git-ignored like the voice index.
  */
 import { readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs"
+import { hostname } from "node:os"
 import path from "node:path"
 
 export type Scope = "session" | "project" | "global"
@@ -48,6 +49,7 @@ export type VoiceState = {
   projects: Record<string, boolean>
   sessions: Record<string, boolean>
   sidebar: boolean
+  lastAction?: LastAction
   lastPurge?: LastPurge
   lastAttempt?: LastPurge
   cache?: CacheStats
@@ -369,34 +371,60 @@ export function writeClientPlayback(root: string, enabled: boolean): ClientPlayb
   return value
 }
 
-/** Per-machine mode override: its own file, so host stat writes cannot clobber it. */
+/** Per-machine mode override.
+ *
+ * The plugin root is a shared folder, so a plain `{ mode }` would flip every
+ * machine. The file keeps one entry per hostname and each machine reads only
+ * its own; the plan's shape is preserved inside `hosts`.
+ */
 export function modeOverridePath(root: string): string {
   return path.join(root, ".mode-override.json")
 }
 
+type ModeOverrideFile = { hosts?: Record<string, { at?: number; mode?: string }>; at?: number; mode?: string }
+
+function normaliseOverride(raw: { at?: number; mode?: string } | undefined): ModeOverride {
+  const mode = raw?.mode === "host" || raw?.mode === "client" ? raw.mode : "auto"
+  return { at: Number(raw?.at) || 0, mode }
+}
+
 export function readModeOverride(root: string): ModeOverride {
   try {
-    const raw = JSON.parse(readFileSync(modeOverridePath(root), "utf8")) as {
-      at?: number
-      mode?: string
-    }
-    const mode = raw.mode === "host" || raw.mode === "client" ? raw.mode : "auto"
-    return { at: Number(raw.at) || 0, mode }
+    const raw = JSON.parse(readFileSync(modeOverridePath(root), "utf8")) as ModeOverrideFile
+    const own = raw.hosts && typeof raw.hosts === "object" ? raw.hosts[hostname()] : undefined
+    if (own) return normaliseOverride(own)
+    // Legacy file from before per-host storage: it was written by whoever last
+    // flipped the switch, so honour it only when it names this machine.
+    if (raw.mode && raw.hosts === undefined) return normaliseOverride(raw)
+    return { at: 0, mode: "auto" }
   } catch {
     return { at: 0, mode: "auto" }
   }
 }
 
 export function writeModeOverride(root: string, mode: Mode): ModeOverride {
-  const value: ModeOverride = { at: Date.now(), mode }
   const file = modeOverridePath(root)
-  const tmp = `${file}.${process.pid}-${Date.now().toString(36)}.part`
+  let hosts: Record<string, { at: number; mode: Mode }> = {}
   try {
-    writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`)
+    const parsed = JSON.parse(readFileSync(file, "utf8")) as ModeOverrideFile
+    if (parsed.hosts && typeof parsed.hosts === "object") {
+      hosts = Object.fromEntries(
+        Object.entries(parsed.hosts).map(([machine, value]) => [machine, normaliseOverride(value)]),
+      )
+    }
+  } catch {
+    /* first write */
+  }
+  const value: ModeOverride = { at: Date.now(), mode }
+  hosts[hostname()] = value
+  const tmp = `${file}.${process.pid}-${Date.now().toString(36)}.part`
+  const payload = `${JSON.stringify({ hosts }, null, 2)}\n`
+  try {
+    writeFileSync(tmp, payload)
     renameSync(tmp, file)
   } catch {
     try {
-      writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`)
+      writeFileSync(file, payload)
     } catch {
       /* ignore */
     }

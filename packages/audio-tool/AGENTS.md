@@ -115,6 +115,7 @@ future agent can tell whether a local copy still matches this repo.
 | 6 | 2026-11-26 | `playback.speak_subagents` (false); parent session mutes cover subagents |
 | 7 | 2026-11-26 | `output.retention.auto_purge_minutes` (30); sweeps run every 5 minutes |
 | 8 | 2026-11-26 | `output.format: auto` (home = WAV, no encode); `link_format` m4a/96k for away; replay reuses archived WAV |
+| 9 | 2026-11-27 | `synthesis.piper_bin` (per-machine binary; macOS host); plugin mode can be overridden per machine |
 
 Rules:
 
@@ -129,7 +130,10 @@ Rules:
 
 If `piper/piper` or `voices/voice.onnx` is missing, run `./fetch.sh` from the
 repo root first; it downloads the pinned binary and default voice and verifies
-their hashes.
+their hashes. On macOS the Linux binary cannot run: `./fetch-macos.sh` installs
+`piper-macos/piper` (git-ignored) and the commands below substitute it. The
+plugin resolves the right binary itself; a hand-run command on the Mac uses
+`piper-macos/piper` and `afplay` for playback.
 
 ```sh
 REPO=/media/share/opencode-audio-tool

@@ -86,10 +86,19 @@ the client-side parts are disabled.
 
 | Mode | Runs on | What it does |
 |---|---|---|
-| `auto` (default) | anywhere | Linux with an executable `piper/piper` → `host`; everything else → `client` |
-| `host` | the machine with piper | synthesises, enqueues, plays; watches `.voice-requests/`; publishes stats every 15 s |
+| `auto` (default) | anywhere | Linux with an executable `piper/piper`, or macOS with `piper-macos/piper` (or `piperBin` / `PIPER_BIN`) → `host`; everything else → `client` |
+| `host` | the machine with piper | synthesises, enqueues, plays; watches `.voice-requests/`; publishes stats every 2 s |
 | `client` | a machine sharing the folder (e.g. the Mac) | never runs piper; writes request files and reads the host's stats from the shared state |
 | `remote` | any machine without a shared folder | refuses; the tunnel design in `docs/remote-audio-pairing.md` is not built yet |
+
+`auto` checks the file header instead of running piper: a Linux ELF is not
+accepted on macOS, so the shared `piper/` copy does not make a Mac a host by
+accident. The effective mode and its origin (`option`, `override`, `auto`) are
+shown in the desktop audio panel, where **Run as host on this machine** flips
+between host and client without restarting the plugin. The override is stored
+per hostname in `.mode-override.json` (the plugin root is shared, so each
+machine reads only its own entry; git-ignored). Use the **Auto** button to
+forget it.
 
 Client and host talk through the shared directory only — no network, no RPC across
 machines:
@@ -97,7 +106,9 @@ machines:
 ```
 <root>/.voice-requests/req-<id>.json   client -> host { text, sessionID }
 <root>/.voice-index.json               host -> clients (latest 50, newest first)
-<root>/.voice-state.json               mute state, shared by both
+<root>/.voice-state.json               mute state + host stats/heartbeat, shared
+<root>/.mode-override.json             per-machine host/client choice (not shared state)
+<root>/.client-playback.json           per-machine "play on this Mac" flag
 ```
 
 The host polls the request directory every 2 s (SMB/virtiofs events are not
@@ -111,16 +122,18 @@ mid-synthesis does not strand it.
 On a VM whose audio device is passed through, the Mac client needs nothing else:
 the VM plays, the Mac sees the entry.
 
-Mac (client) config, using the Mac-side path to the shared folder:
+Mac (client) config, using the canonical Mac-side path to the shared folder
+(macOS does not follow the `opencode-audio-tool` symlink over SMB):
 
 ```jsonc
 {
   "plugins": [
     {
-      "package": "/Users/<you>/<shared>/opencode-audio-tool/plugin",
+      "package": "/Users/<you>/<shared>/opencode-helpers/packages/audio-tool/plugin",
       "options": {
         "mode": "client",
-        "root": "/Users/<you>/<shared>/opencode-audio-tool",
+        "root": "/Users/<you>/<shared>/opencode-helpers/packages/audio-tool",
+        "sharedRoot": "/Users/<you>/<shared>",
         "auto": true
       }
     }
@@ -128,15 +141,50 @@ Mac (client) config, using the Mac-side path to the shared folder:
 }
 ```
 
+`sharedRoot` is the Mac's view of the SMB share; it maps canonical
+`/media/share/...` index and output paths to local paths. Without it the plugin
+only derives it when `root` ends with `/opencode-helpers/packages/audio-tool`.
+
 Client mode needs no piper and no Python: it only reads and writes the shared
 files. macOS also ships no `aplay`, and does not need one — playback stays on
 the host.
+
+## Host on macOS
+
+```sh
+cd packages/audio-tool
+./fetch-macos.sh          # piper-macos/piper, native arm64 or x64
+./fetch.sh                # voices/voice.onnx if you have not fetched it yet
+```
+
+`fetch-macos.sh` never touches `piper/` (the Linux copy). The published
+2023.11.14-2 macOS archives are broken (x86_64 binary with the shared libraries
+missing), so the script prefers the self-contained `piper-tts` wheel and falls
+back to the release archive only with `PIPER_MACOS_RELEASE=1`. The pip wheel has
+no `--json-input`; `piperd.py` detects that and serves the same socket with one
+piper process per request.
+
+Host mode on the Mac then works like the VM: `voice_speak` writes a WAV under
+`output.directory`, enqueues it in the per-machine queue
+(`/tmp/opencode/audio-replies/queue`), and the drainer plays it with `afplay`.
+`output.directory` and the cache root are canonical `/media/share/...` paths in
+the shared index, but bytes are written under `<sharedRoot>/tmp/audio/...`.
+
+Prerequisites: `python3` (Xcode Command Line Tools are enough; install with
+`xcode-select --install` if `python3 -c 'import wave'` fails) and `afplay`
+(built in). For the away profile, install `ffmpeg` (`brew install ffmpeg`) or
+point `output.ffmpeg` at a static build; home keeps the WAV and needs neither.
 
 ## Options
 
 | Option | Default | Meaning |
 |---|---|---|
 | `root` | `/media/share/opencode-audio-tool` | where `audioq.py`, `piper/` and `voices/` live |
+| `mode` | `auto` | `auto`, `host`, `client`, or `remote`; a per-machine override wins at runtime |
+| `sharedRoot` | derived when `root` matches the monorepo layout | this machine's view of the SMB share, used to map `/media/share/...` paths |
+| `cacheDir` | `~/.cache/opencode-audio-tool` | where client playback copies new replies |
+| `player` | `afplay` on macOS, `aplay -q` elsewhere | player command for client playback and the drainer |
+| `piperBin` | option → `PIPER_BIN` → `piper-macos/piper` (macOS) → `piper/piper` | Piper binary for this machine |
 | `auto` | `true` when `.dev/audiomode.jsonc` exists | speak each finished reply |
 | `maxChars` | `2000` | split longer replies into sequential chunks (sentence boundaries first) |
 | `emptyNotice` | `{session} here: my last message was untranscribable, check the app` | spoken when sanitising removes everything |
@@ -231,9 +279,14 @@ packages/audio-tool`; set the plugin option `sharedRoot` (for example
 `/Users/you/share`) when the layout differs. Without a mapping the log records
 `cannot map <path>` instead of failing silently.
 
-This is playback-only: the host still does synthesis. Full local generation on
-the Mac (macOS piper binary + local drainer, so it works with the VM gone) is the
-next step and needs a per-machine piper path.
+This is playback-only while the machine is a client. Flip **Run as host on this
+machine** in the panel to let the Mac synthesise, enqueue, and play locally with
+`piper-macos/piper` and `afplay` (see **Host on macOS**); switching back to
+client starts the local-cache player again. Hosts publish
+`hostHeartbeat`/`hosts` in the shared state every 2 s, and the panel warns when a
+different machine's heartbeat is younger than 15 s, so two active hosts are
+visible. Nothing disables them automatically: the queues are per machine, so if
+both synthesise they will both speak.
 
 ## Subagents
 

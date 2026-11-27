@@ -17,8 +17,8 @@
   // Schema version of this config, not of the audio. Bump it whenever keys or
   // their meaning change; record the bump in "preferences_log" and in
   // AGENTS.md ("Config versions"). The config is versioned in lockstep with
-  // this repo, as the pseudo-package opencode-audio-tool/cfg@8.
-  "version": 8,
+  // this repo, as the pseudo-package opencode-audio-tool/cfg@9.
+  "version": 9,
   "scope": "local machine only",
   "tool": {
     // The repo this config targets, and the version of its config schema.
@@ -109,6 +109,9 @@
     // Piper is already installed here; no sudo, no pip, no network at speak time.
     "engine": "piper",
     "binary": "/media/share/opencode-audio-tool/piper/piper",
+    // Per-machine override the plugin reads first (option piperBin and
+    // PIPER_BIN beat it). On a Mac: "<share>/opencode-helpers/packages/audio-tool/piper-macos/piper".
+    "piper_bin": "",
     "model": "/media/share/opencode-audio-tool/voices/voice.onnx",
     "voice": "en_US-lessac-medium",
     // One voice per session makes concurrent speakers distinguishable. Pick a
@@ -281,6 +284,7 @@
     { "date": "2026-11-26", "change": "cfg@5: voice_per_session with a voices list; explicit voice override on voice_speak" },
     { "date": "2026-11-26", "change": "cfg@6: playback.speak_subagents added (false); subagent auto-speak off, parent mute inherited, child items marked" },
     { "date": "2026-11-26", "change": "cfg@7: auto purge of audio cache after 30 minutes; sweep every 5 minutes" },
-    { "date": "2026-11-26", "change": "cfg@8: home stays WAV; only away/link shares encode (m4a default)" }
+    { "date": "2026-11-26", "change": "cfg@8: home stays WAV; only away/link shares encode (m4a default)" },
+    { "date": "2026-11-27", "change": "cfg@9: synthesis.piper_bin for per-machine Piper (macOS host); plugin mode can be overridden per machine" }
   ]
 }

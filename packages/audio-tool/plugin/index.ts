@@ -81,10 +81,9 @@ const DEFAULT_SOCK = "/tmp/opencode/audio-replies/piperd.sock"
  * through every call. One plugin instance per process is the normal case.
  */
 let hostOptions: Options = {}
-let hostRoot = DEFAULT_ROOT
+let pluginConfig: ReplyConfig = {}
 let activeMode: ResolvedMode = "client"
 let modeOrigin: "option" | "override" | "auto" = "auto"
-let hostCapable = false
 let queueDirPath = DEFAULT_QUEUE
 let socketPath = DEFAULT_SOCK
 let audioRootDir = DEFAULT_AUDIO_ROOT
@@ -1176,7 +1175,7 @@ function ensureDaemon(root: string, queueDir: string, sock: string, env: NodeJS.
       }
       log(`daemon attempt failed (pid ${child.pid}); socket absent after 10s`)
       try {
-        if (!pidAlive(child.pid)) unlinkSync(pidFile)
+        if (child.pid !== undefined && !pidAlive(child.pid)) unlinkSync(pidFile)
       } catch {
         /* ignore */
       }
@@ -1365,7 +1364,7 @@ async function voiceState(
     mode,
     modeSource: modeOrigin,
     modeOverride: readModeOverride(root),
-    canHost: piperBinary(hostOptions, root) !== null,
+    canHost: piperBinary(hostOptions, root, pluginConfig) !== null,
     source: mode === "client" ? "host" : "local",
     statsAgeMs: Math.max(
       0,
@@ -1567,11 +1566,11 @@ export default Plugin.define({
     const root = options.root ?? DEFAULT_ROOT
     const location = ctx.location?.directory ?? process.cwd()
     hostOptions = options
-    hostRoot = root
     queueDirPath = process.env.AUDIOQ_DIR || DEFAULT_QUEUE
     socketPath = process.env.AUDIOQ_SOCK || DEFAULT_SOCK
     audioRootDir = audioRoot(options)
     const startupConfig = await readConfig(root, location)
+    pluginConfig = startupConfig
     const speakSubagents =
       options.speakSubagents ?? startupConfig.playback?.speak_subagents ?? false
     const requestedMode: Mode = options.mode ?? "auto"
@@ -1664,9 +1663,11 @@ export default Plugin.define({
     let mode: ResolvedMode = "client"
     let modeStopper: (() => void) | undefined
 
-    const applyMode = (next: ResolvedMode): { ok: boolean; reason?: string } => {
+    const applyMode = (
+      next: ResolvedMode,
+      control: { resetClientCursor?: boolean } = {},
+    ): { ok: boolean; reason?: string } => {
       if (next === "host" && piperBinary(options, root, startupConfig) === null) {
-        hostCapable = false
         return {
           ok: false,
           reason:
@@ -1675,7 +1676,6 @@ export default Plugin.define({
               : "no piper/piper binary; run ./fetch.sh or set the piperBin option",
         }
       }
-      hostCapable = next === "host" || piperBinary(options, root, startupConfig) !== null
       modeStopper?.()
       modeStopper = undefined
       const previous = mode
@@ -1684,8 +1684,9 @@ export default Plugin.define({
       if (next === "host") {
         modeStopper = startHostPieces()
       } else if (next === "client") {
-        // Start from now: switching back must not replay the whole index.
-        void ctx.storage.set("voiceClientLastAt", Date.now())
+        // A runtime switch starts from now; a normal startup keeps the cursor so
+        // replies produced while the plugin was down still play.
+        if (control.resetClientCursor) void ctx.storage.set("voiceClientLastAt", Date.now())
         modeStopper = startClientPlayback(ctx, root, options)
       }
       log(`mode ${next} (was ${previous}, platform ${process.platform})`)
@@ -1820,7 +1821,7 @@ export default Plugin.define({
           const next: ResolvedMode =
             requested === "auto" ? resolveMode("auto", root, options, startupConfig) : requested
           writeModeOverride(root, requested)
-          const applied = applyMode(next)
+          const applied = applyMode(next, { resetClientCursor: true })
           if (!applied.ok) {
             writeModeOverride(root, previous.mode)
             throw new Error(applied.reason ?? "mode could not be applied")

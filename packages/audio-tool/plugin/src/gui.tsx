@@ -88,13 +88,25 @@ function AudioPanel(props: { session: Session }) {
   const ctx = usePlugin()
   const [state, setState] = createSignal<State | undefined>()
 
+  const fail = (action: string, error: unknown) => {
+    ctx.toast.show({
+      title: `Voice: ${action} failed`,
+      description: String(error).slice(0, 300),
+      variant: "error",
+      duration: 8000,
+    })
+  }
+
   // An in-flight poll can resolve after a mutation and revert it. Accept a
-  // response only if its clientPlayback timestamp is not older than what we
-  // already show; a response without the flag counts as older.
+  // response only if its clientPlayback/modeOverride timestamps are not older
+  // than what we already show; a response without a flag counts as older.
   const applyState = (next: State) => {
     const incoming = next?.clientPlayback?.at ?? 0
     const current = state()?.clientPlayback?.at ?? 0
     if (incoming < current) return
+    const incomingMode = next?.modeOverride?.at ?? 0
+    const currentMode = state()?.modeOverride?.at ?? 0
+    if (incomingMode < currentMode) return
     setState(next)
   }
 
@@ -157,6 +169,30 @@ function AudioPanel(props: { session: Session }) {
       .then((next: unknown) => applyState(next as State))
       .catch(() => {})
   }
+
+  const quickToggle = () => {
+    if (activeMute()) {
+      for (const scope of ["session", "project", "global"] as const) {
+        if (state()?.mutes?.[scope]) toggle(scope)
+      }
+      return
+    }
+    toggle("global")
+  }
+
+  const setLocalPlayback = (enabled: boolean) =>
+    ctx.client
+      .rpc(Voice)
+      .setClientPlayback({ directory: props.session.directory, sessionID: props.session.id, enabled })
+      .then((next: unknown) => applyState(next as State))
+      .catch((error) => fail("local playback", error))
+
+  const setMode = (mode: "auto" | "host" | "client") =>
+    ctx.client
+      .rpc(Voice)
+      .setMode({ directory: props.session.directory, sessionID: props.session.id, mode })
+      .then((next: unknown) => applyState(next as State))
+      .catch((error) => fail("switch mode", error))
 
   const purgeText = () => {
     const last = state()?.lastPurge
@@ -266,7 +302,8 @@ function AudioPanel(props: { session: Session }) {
         }}
       >
         <span>
-          Mode: {state()?.mode ?? "?"} · Data: {state()?.source ?? "?"}
+          Mode: {state()?.mode ?? "?"}
+          {state()?.modeSource ? ` (${state()?.modeSource})` : ""} · Data: {state()?.source ?? "?"}
           {typeof state()?.statsAgeMs === "number"
             ? ` (${Math.max(0, Math.round((state()?.statsAgeMs ?? 0) / 1000))}s old)`
             : ""}{" "}
@@ -275,6 +312,40 @@ function AudioPanel(props: { session: Session }) {
         </span>
         <span style={{ opacity: 0.6 }}>{activeMute() ? "turn on" : "mute all"}</span>
       </button>
+      <div style={{ display: "flex", "align-items": "center", gap: "8px", "flex-wrap": "wrap" }}>
+        <label
+          style={{ display: "flex", "align-items": "center", gap: "6px" }}
+          title={
+            state()?.canHost === false
+              ? "No piper binary for this machine; run ./fetch-macos.sh or set piperBin"
+              : "Synthesise and play on this machine instead of sending requests to another host"
+          }
+        >
+          <input
+            type="checkbox"
+            checked={state()?.mode === "host"}
+            disabled={state()?.canHost === false && state()?.mode !== "host"}
+            onChange={(event) => void setMode(event.currentTarget.checked ? "host" : "client")}
+          />
+          Run as host on this machine
+        </label>
+        <Show when={state()?.modeSource === "override"}>
+          <button
+            type="button"
+            className="voice-btn"
+            title="Forget the per-machine override and follow the option / auto-detection"
+            onClick={() => void setMode("auto")}
+          >
+            Auto
+          </button>
+        </Show>
+      </div>
+      <Show when={state()?.mode === "host" && state()?.otherHost}>
+        <div style={{ color: "#c08020" }}>
+          ⚠ Another host is active: {state()?.otherHost?.machine} ·{" "}
+          {Math.max(0, Math.round((Date.now() - (state()?.otherHost?.at ?? Date.now())) / 1000))}s ago
+        </div>
+      </Show>
       <Show when={state()?.cache}>
         <div style={{ opacity: 0.7 }}>
           Cache (all): {formatBytes(state()?.cache?.bytes ?? 0)} · {state()?.cache?.files ?? 0} file

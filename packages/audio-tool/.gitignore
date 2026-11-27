@@ -42,6 +42,7 @@ desktop.ini
 # Fetched and generated: run ./fetch.sh to populate. None of this is source,
 # and two voices exceed GitHub's 100 MB per-file limit anyway.
 piper/
+piper-macos/
 voices/
 audio-replies/
 
@@ -63,3 +64,6 @@ plugin/package-lock.json
 
 # Per-machine client playback toggle
 .client-playback.json
+
+# Per-machine host/client override (never shared via .voice-state.json)
+.mode-override.json

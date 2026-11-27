@@ -1,6 +1,9 @@
 # Plan — Mac host mode, local playback, runtime mode switch
 
-Status: ready to implement from a Mac session. Companion to
+Status: implemented on branch `mac-host-mode` (2026-11-27). The upstream macOS
+release archive turned out to be broken (x86_64 binary, missing dylibs), so
+`fetch-macos.sh` installs the native `piper-tts` wheel instead and `piperd.py`
+falls back to one-shot synthesis when `--json-input` is absent. Companion to
 `docs/remote-audio-pairing.md` and `plugin/PROPOSAL.md`.
 
 Repo: `packages/audio-tool` in the `opencode-helpers` monorepo
@@ -195,9 +198,11 @@ Do **not** reuse `.voice-state.json` (host stat writes clobber it — the
 client-playback flag had exactly that bug). Add:
 
 ```
-.mode-override.json   { "at": …, "mode": "host" | "client" | "auto" }
+.mode-override.json   { "hosts": { "<hostname>": { "at": …, "mode": "host" | "client" | "auto" } } }
 ```
 
+The plugin root is a shared folder, so the entry is keyed by hostname; each
+machine reads only its own and writes it back without touching the other's.
 - RPC `setMode { mode, directory, sessionID }` writes it, calls `applyMode`,
   returns state.
 - State reports `mode`, `modeOverride`, and a `hostHeartbeat` (see below).
