@@ -50,9 +50,12 @@ DEFAULT_PLAYER = "afplay" if sys.platform == "darwin" else "aplay -q"
 # control file, so the panel can pause/resume/seek without owning the process.
 CONTROL_NAME = ".playback-control.json"
 PROGRESS_NAME = ".playing.json"
+RATE_NAME = ".playback-rate"
 SEEK_DIR = ".seek"
 PLAYER_POLL = 0.1
 PROGRESS_INTERVAL = 0.5
+MIN_RATE = 0.25
+MAX_RATE = 4.0
 
 POLL_SECONDS = 0.25
 MAX_PLAYED = 100
@@ -749,6 +752,25 @@ def _write_progress(path, payload):
         pass
 
 
+def _read_rate(queue_dir):
+    """Persisted playback rate, clamped; 1.0 when unset or unreadable."""
+    try:
+        with open(os.path.join(queue_dir, RATE_NAME), "r", encoding="utf-8") as f:
+            value = float(f.read().strip())
+    except (OSError, ValueError):
+        return 1.0
+    return max(MIN_RATE, min(MAX_RATE, value))
+
+
+def _rate_cmd(cmd, rate):
+    """afplay has a real -r option; other players keep their own tempo."""
+    if abs(rate - 1.0) < 0.001:
+        return list(cmd)
+    if os.path.basename(cmd[0]).lower() == "afplay":
+        return list(cmd) + ["-r", f"{rate:.3f}"]
+    return list(cmd)
+
+
 def _trim_wav(src, start_seconds, dest):
     """Write `src` from `start_seconds` to `dest`, header included."""
     with wave.open(src, "rb") as reader:
@@ -830,6 +852,7 @@ def _play(queue_dir, wav, player, dry_run=False):
         for fd in fds:
             fcntl.flock(fd, fcntl.LOCK_EX)
 
+        rate = _read_rate(queue_dir)
         offset = 0.0
         started = time.time()
         paused_total = 0.0
@@ -838,7 +861,7 @@ def _play(queue_dir, wav, player, dry_run=False):
         last_publish = 0.0
         try:
             proc = subprocess.Popen(
-                cmd + [wav], stdout=subprocess.DEVNULL,
+                _rate_cmd(cmd, rate) + [wav], stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE, text=True)
         except OSError as exc:
             return 127, str(exc)
@@ -847,7 +870,7 @@ def _play(queue_dir, wav, player, dry_run=False):
             rc = proc.poll()
             now = time.time()
             base = paused_at if paused_at is not None else now
-            position = offset + max(0.0, base - started - paused_total)
+            position = offset + max(0.0, base - started - paused_total) * rate
             if total > 0:
                 position = min(position, total)
             if now - last_publish >= PROGRESS_INTERVAL or rc is not None:
@@ -859,6 +882,7 @@ def _play(queue_dir, wav, player, dry_run=False):
                     "seconds": round(total, 3),
                     "position": round(position, 3),
                     "paused": paused_at is not None,
+                    "rate": round(rate, 3),
                     "offset": round(offset, 3),
                     "ack": int(ack),
                 })
@@ -887,13 +911,23 @@ def _play(queue_dir, wav, player, dry_run=False):
                         paused_at = None
                     except OSError:
                         pass
-                elif action == "seek":
-                    try:
-                        target = float(control.get("position") or 0)
-                    except (TypeError, ValueError):
-                        target = 0.0
-                    target = max(0.0, min(total, target)) if total > 0 else max(0.0, target)
+                elif action in ("seek", "rate"):
                     was_paused = paused_at is not None
+                    if action == "seek":
+                        try:
+                            target = float(control.get("position") or 0)
+                        except (TypeError, ValueError):
+                            target = 0.0
+                        new_rate = rate
+                    else:
+                        base_now = paused_at if paused_at is not None else time.time()
+                        target = offset + max(0.0, base_now - started - paused_total) * rate
+                        try:
+                            new_rate = float(control.get("rate") or 1.0)
+                        except (TypeError, ValueError):
+                            new_rate = 1.0
+                        new_rate = max(MIN_RATE, min(MAX_RATE, new_rate))
+                    target = max(0.0, min(total, target)) if total > 0 else max(0.0, target)
                     _stop_player(proc)
                     os.makedirs(seek_dir, exist_ok=True)
                     if temp:
@@ -903,7 +937,7 @@ def _play(queue_dir, wav, player, dry_run=False):
                     try:
                         _trim_wav(wav, target, temp)
                         proc = subprocess.Popen(
-                            cmd + [temp], stdout=subprocess.DEVNULL,
+                            _rate_cmd(cmd, new_rate) + [temp], stdout=subprocess.DEVNULL,
                             stderr=subprocess.PIPE, text=True)
                     except (OSError, wave.Error) as exc:
                         # Seeking failed (foreign/odd WAV): restart from the top
@@ -913,16 +947,18 @@ def _play(queue_dir, wav, player, dry_run=False):
                         target = 0.0
                         try:
                             proc = subprocess.Popen(
-                                cmd + [wav], stdout=subprocess.DEVNULL,
+                                _rate_cmd(cmd, new_rate) + [wav],
+                                stdout=subprocess.DEVNULL,
                                 stderr=subprocess.PIPE, text=True)
                         except OSError as exc2:
                             return 127, f"seek failed ({exc}); restart failed ({exc2})"
+                    rate = new_rate
                     offset = target
                     started = time.time()
                     paused_total = 0.0
                     paused_at = None
                     if was_paused:
-                        # Seeking a paused reply keeps it paused at the new spot.
+                        # Seek/rate changes keep a paused reply paused.
                         try:
                             proc.send_signal(signal.SIGSTOP)
                             paused_at = time.time()

@@ -179,6 +179,40 @@ function playerArgv(player: string): string[] {
   return parts.length > 0 ? parts : ["aplay", "-q"]
 }
 
+function clampRate(value: number): number {
+  if (!Number.isFinite(value)) return 1
+  return Math.min(4, Math.max(0.25, value))
+}
+
+/** afplay takes `-r`; other players keep their own tempo. */
+function playerWithRate(player: string[], rate: number): string[] {
+  if (Math.abs(rate - 1) < 0.001) return player
+  if (path.basename(player[0] ?? "").toLowerCase() !== "afplay") return player
+  return [...player, "-r", rate.toFixed(3)]
+}
+
+function playbackRatePath(): string {
+  return path.join(queueDirPath, ".playback-rate")
+}
+
+function readPlaybackRate(): number {
+  try {
+    return clampRate(Number(readFileSync(playbackRatePath(), "utf8").trim()))
+  } catch {
+    return 1
+  }
+}
+
+function writePlaybackRate(rate: number): number {
+  const value = clampRate(rate)
+  try {
+    writeFileSync(playbackRatePath(), `${value}\n`)
+  } catch {
+    /* best effort */
+  }
+  return value
+}
+
 /** Cache/purge root: a real local path, not the VM-only /media/share path. */
 function audioRoot(opts: Options): string {
   if (opts.sharedRoot) return path.join(opts.sharedRoot, "tmp", "audio")
@@ -509,6 +543,7 @@ type LocalPlayer = {
   paused: boolean
   pausedAt?: number
   pausedTotal: number
+  rate: number
   generation: number
   entryAt: number
   temp?: string
@@ -561,12 +596,13 @@ function localPlaybackInfo(): Playback | null {
   if (!p) return null
   const now = Date.now()
   const elapsed = ((p.paused && p.pausedAt ? p.pausedAt : now) - p.startedAt - p.pausedTotal) / 1000
-  const position = Math.max(0, p.offset + Math.max(0, elapsed))
+  const position = Math.max(0, p.offset + Math.max(0, elapsed) * p.rate)
   const info: Playback = {
     at: now,
     seconds: p.seconds,
     position: p.seconds > 0 ? Math.min(p.seconds, position) : position,
     paused: p.paused,
+    rate: p.rate,
     source: "local",
   }
   if (p.file) info.file = p.file
@@ -595,7 +631,9 @@ function startClientPlayback(ctx: any, root: string, opts: Options): () => void 
   }
 
   const start = (entry: IndexEntry, cacheFile: string) => {
-    const child = spawn(player[0], [...player.slice(1), cacheFile], { detached: true, stdio: "ignore" })
+    const rate = readPlaybackRate()
+    const argv = playerWithRate(player, rate)
+    const child = spawn(argv[0], [...argv.slice(1), cacheFile], { detached: true, stdio: "ignore" })
     child.unref()
     const p: LocalPlayer = {
       child,
@@ -606,6 +644,7 @@ function startClientPlayback(ctx: any, root: string, opts: Options): () => void 
       offset: 0,
       paused: false,
       pausedTotal: 0,
+      rate,
       generation: 0,
       entryAt: entry.at,
     }
@@ -619,7 +658,65 @@ function startClientPlayback(ctx: any, root: string, opts: Options): () => void 
     logAction(root, "play", "ok", path.basename(cacheFile))
   }
 
-  const control = (action: "pause" | "resume" | "seek" | "stop", position?: number) => {
+  /** Stop the current child and resume from `target` at `rate`, paused if asked. */
+  const restart = (p: LocalPlayer, target: number, rate: number, wasPaused: boolean) => {
+    try {
+      p.child.kill("SIGCONT")
+      p.child.kill("SIGTERM")
+    } catch {
+      /* ignore */
+    }
+    mkdirSync(cacheDir, { recursive: true })
+    let temp: string | undefined = path.join(
+      cacheDir,
+      `.seek-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}.wav`,
+    )
+    let source = temp
+    let offset = target
+    if (!trimWav(p.cacheFile, temp, target)) {
+      logAction(root, "seek", "error", "not a WAV; restarting from the top")
+      temp = undefined
+      source = p.cacheFile
+      offset = 0
+    }
+    if (p.temp) {
+      try {
+        unlinkSync(p.temp)
+      } catch {
+        /* already gone */
+      }
+    }
+    const generation = ++p.generation
+    const argv = playerWithRate(player, rate)
+    const child = spawn(argv[0], [...argv.slice(1), source], { detached: true, stdio: "ignore" })
+    child.unref()
+    p.child = child
+    p.temp = temp
+    p.offset = offset
+    p.rate = rate
+    p.startedAt = Date.now()
+    p.pausedTotal = 0
+    p.paused = wasPaused
+    p.pausedAt = wasPaused ? Date.now() : undefined
+    if (wasPaused) {
+      try {
+        child.kill("SIGSTOP")
+      } catch {
+        /* ignore */
+      }
+    }
+    child.on("error", (error) => {
+      logAction(root, "play", "error", String(error))
+      finalize(p, generation)
+    })
+    child.on("close", () => finalize(p, generation))
+  }
+
+  const control = (
+    action: "pause" | "resume" | "seek" | "rate" | "stop",
+    position?: number,
+    rate?: number,
+  ) => {
     const p = localPlayer
     if (!p) return
     if (action === "pause" && !p.paused) {
@@ -652,60 +749,18 @@ function startClientPlayback(ctx: any, root: string, opts: Options): () => void 
       }
       return
     }
+    const limit = p.seconds > 0 ? p.seconds : Number.POSITIVE_INFINITY
     if (action === "seek") {
-      const target = Math.max(
-        0,
-        Math.min(p.seconds > 0 ? p.seconds : Number.POSITIVE_INFINITY, Number(position) || 0),
-      )
-      const wasPaused = p.paused
-      try {
-        p.child.kill("SIGCONT")
-        p.child.kill("SIGTERM")
-      } catch {
-        /* ignore */
-      }
-      mkdirSync(cacheDir, { recursive: true })
-      let temp: string | undefined = path.join(
-        cacheDir,
-        `.seek-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}.wav`,
-      )
-      let source = temp
-      let offset = target
-      if (!trimWav(p.cacheFile, temp, target)) {
-        logAction(root, "seek", "error", "not a WAV; restarting from the top")
-        temp = undefined
-        source = p.cacheFile
-        offset = 0
-      }
-      if (p.temp) {
-        try {
-          unlinkSync(p.temp)
-        } catch {
-          /* already gone */
-        }
-      }
-      const generation = ++p.generation
-      const child = spawn(player[0], [...player.slice(1), source], { detached: true, stdio: "ignore" })
-      child.unref()
-      p.child = child
-      p.temp = temp
-      p.offset = offset
-      p.startedAt = Date.now()
-      p.pausedTotal = 0
-      p.paused = wasPaused
-      p.pausedAt = wasPaused ? Date.now() : undefined
-      if (wasPaused) {
-        try {
-          child.kill("SIGSTOP")
-        } catch {
-          /* ignore */
-        }
-      }
-      child.on("error", (error) => {
-        logAction(root, "play", "error", String(error))
-        finalize(p, generation)
-      })
-      child.on("close", () => finalize(p, generation))
+      const target = Math.max(0, Math.min(limit, Number(position) || 0))
+      restart(p, target, p.rate, p.paused)
+      return
+    }
+    if (action === "rate") {
+      const now = Date.now()
+      const elapsed =
+        ((p.paused && p.pausedAt ? p.pausedAt : now) - p.startedAt - p.pausedTotal) / 1000
+      const target = Math.max(0, Math.min(limit, p.offset + Math.max(0, elapsed) * p.rate))
+      restart(p, target, clampRate(rate ?? 1), p.paused)
     }
   }
 
@@ -1058,14 +1113,17 @@ function hostPlayback(): Playback | null {
       seconds?: number
       position?: number
       paused?: boolean
+      rate?: number
     }
     const seconds = Number(raw.seconds) || 0
     if (!(seconds > 0)) return null
+    const rate = Number(raw.rate)
     const info: Playback = {
       at: Number(raw.at) || Date.now(),
       seconds,
       position: Math.max(0, Math.min(seconds, Number(raw.position) || 0)),
       paused: raw.paused === true,
+      rate: Number.isFinite(rate) && rate > 0 ? rate : 1,
       source: "local",
     }
     const file = raw.source || raw.file
@@ -1078,10 +1136,11 @@ function hostPlayback(): Playback | null {
 }
 
 /** Host side of the panel controls; the drainer polls and applies this file. */
-function writePlaybackControl(action: string, position?: number): void {
+function writePlaybackControl(action: string, position?: number, rate?: number): void {
   const file = path.join(queueDirPath, ".playback-control.json")
   const payload: Record<string, unknown> = { action, at: Date.now() }
   if (typeof position === "number" && Number.isFinite(position)) payload.position = position
+  if (typeof rate === "number" && Number.isFinite(rate)) payload.rate = rate
   const tmp = `${file}.${process.pid}.part`
   try {
     writeFileSync(tmp, `${JSON.stringify(payload)}\n`)
@@ -1614,6 +1673,7 @@ async function voiceState(
     modeOverride: ModeOverride
     canHost: boolean
     version: string
+    playbackRate: number
     source: "local" | "host"
     statsAgeMs: number
     cache: { files: number; bytes: number }
@@ -1639,6 +1699,7 @@ async function voiceState(
     modeOverride: readModeOverride(root),
     canHost: piperBinary(hostOptions, root, pluginConfig) !== null,
     version: PLUGIN_VERSION,
+    playbackRate: readPlaybackRate(),
     source: mode === "client" ? "host" : "local",
     statsAgeMs: Math.max(
       0,
@@ -1767,6 +1828,7 @@ function startRequestWatcher(root: string, location: string): () => void {
             path?: string
             action?: string
             position?: number
+            rate?: number
           }
           if (request.kind === "purge") {
             const days = typeof request.days === "number" ? request.days : undefined
@@ -1801,7 +1863,10 @@ function startRequestWatcher(root: string, location: string): () => void {
           }
           if (request.kind === "playback" && request.action) {
             const action =
-              request.action === "pause" || request.action === "resume" || request.action === "seek"
+              request.action === "pause" ||
+              request.action === "resume" ||
+              request.action === "seek" ||
+              request.action === "rate"
                 ? request.action
                 : undefined
             if (action) {
@@ -1809,7 +1874,12 @@ function startRequestWatcher(root: string, location: string): () => void {
                 typeof request.position === "number" && Number.isFinite(request.position)
                   ? Math.max(0, request.position)
                   : undefined
-              writePlaybackControl(action, position)
+              const rate =
+                typeof request.rate === "number" && Number.isFinite(request.rate)
+                  ? clampRate(request.rate)
+                  : undefined
+              if (rate !== undefined) writePlaybackRate(rate)
+              writePlaybackControl(action, position, rate)
               log(`playback request served (${action})`)
             }
             try {
@@ -2162,31 +2232,43 @@ export default Plugin.define({
           const args = (input ?? {}) as {
             action?: string
             position?: number
+            rate?: number
             directory?: string
             sessionID?: string
           }
           const action =
-            args.action === "pause" || args.action === "resume" || args.action === "seek"
+            args.action === "pause" ||
+            args.action === "resume" ||
+            args.action === "seek" ||
+            args.action === "rate"
               ? args.action
               : "pause"
           const position =
             typeof args.position === "number" && Number.isFinite(args.position)
               ? Math.max(0, args.position)
               : undefined
+          const rate =
+            typeof args.rate === "number" && Number.isFinite(args.rate)
+              ? clampRate(args.rate)
+              : undefined
           if (action === "seek" && position === undefined) {
             throw new Error("playback seek needs a position")
           }
+          if (action === "rate" && rate === undefined) {
+            throw new Error("playback rate needs a value")
+          }
+          if (action === "rate" && rate !== undefined) writePlaybackRate(rate)
           if (mode === "host" && hostPlayback()) {
-            writePlaybackControl(action, position)
+            writePlaybackControl(action, position, rate)
             // Give the drainer's 100 ms poll time to apply before reporting.
             await new Promise((resolve) => setTimeout(resolve, 250))
           } else if (mode === "client" && localPlayer) {
-            localControl?.(action, position)
+            localControl?.(action, position, rate)
           } else {
             // No local player: forward to the machine that owns the sound
             // (client without local playback, or a host whose queue is idle
             // while the other machine is playing).
-            writeControl(root, { kind: "playback", action, position })
+            writeControl(root, { kind: "playback", action, position, rate })
             await new Promise((resolve) => setTimeout(resolve, 300))
           }
           return await voiceState(root, args.directory ?? location, args.sessionID, mode)

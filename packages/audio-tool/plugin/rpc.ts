@@ -49,6 +49,7 @@ const state = {
     },
     canHost: { type: "boolean" },
     version: { type: "string" },
+    playbackRate: { type: "number" },
     hostHeartbeat: {
       type: "object",
       properties: {
@@ -76,9 +77,10 @@ const state = {
         seconds: { type: "number" },
         position: { type: "number" },
         paused: { type: "boolean" },
+        rate: { type: "number" },
         source: { type: "string", enum: ["local", "host"] },
       },
-      required: ["at", "seconds", "position", "paused", "source"],
+      required: ["at", "seconds", "position", "paused", "rate", "source"],
       additionalProperties: false,
     },
     source: { type: "string", enum: ["local", "host"] },
@@ -203,6 +205,7 @@ const state = {
     "modeOverride",
     "canHost",
     "version",
+    "playbackRate",
     "source",
     "statsAgeMs",
     "generating",
@@ -277,8 +280,9 @@ export const Voice = Rpc.define({
         type: "object",
         properties: {
           ...location,
-          action: { type: "string", enum: ["pause", "resume", "seek"] },
+          action: { type: "string", enum: ["pause", "resume", "seek", "rate"] },
           position: { type: "number" },
+          rate: { type: "number" },
         },
         required: ["directory", "action"],
         additionalProperties: false,

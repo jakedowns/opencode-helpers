@@ -33,6 +33,7 @@ export type Playback = {
   seconds: number
   position: number
   paused: boolean
+  rate: number
   source: "local" | "host"
 }
 export type Mode = "auto" | "host" | "client"
@@ -81,15 +82,18 @@ function normalisePlayback(raw: unknown): Playback {
     seconds?: unknown
     position?: unknown
     paused?: unknown
+    rate?: unknown
     source?: unknown
     file?: unknown
     session?: unknown
   }
+  const rate = Number(value.rate)
   return {
     at: Number(value.at) || 0,
     seconds: Number(value.seconds) || 0,
     position: Number(value.position) || 0,
     paused: value.paused === true,
+    rate: Number.isFinite(rate) && rate > 0 ? rate : 1,
     source: value.source === "host" ? "host" : "local",
     ...(typeof value.file === "string" && value.file ? { file: value.file } : {}),
     ...(typeof value.session === "string" && value.session ? { session: value.session } : {}),

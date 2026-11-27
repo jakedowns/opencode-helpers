@@ -191,8 +191,9 @@ private, expiring link; put that link inline in the reply.
   output WAV path across concurrent replies.
 - `<queue>/.playing.json` is the drainer's progress report and
   `<queue>/.playback-control.json` is the panel's command channel (pause,
-  resume, seek). Neither is a queue item: do not hand-edit them while
-  debugging playback; the drainer owns both.
+  resume, seek, rate). `<queue>/.playback-rate` is the persisted speed. None is
+  a queue item: do not hand-edit them while debugging playback; the drainer
+  owns the first two and the panel owns the rate file.
 
 ## 7. Gotchas
 

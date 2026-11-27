@@ -299,10 +299,12 @@ interpolates between the 2 s state polls, so it moves smoothly.
 - **Host**: `audioq.py` publishes `<queue>/.playing.json` every 0.5 s and polls
   `<queue>/.playback-control.json`. Pause/resume uses `SIGSTOP`/`SIGCONT`; seek
   trims the WAV with Python's `wave` module (no ffmpeg) and restarts the player
-  at that offset. Seeking while paused stays paused.
+  at that offset. The **Speed** dropdown (0.5×–2×) restarts at the current
+  position and is persisted in `<queue>/.playback-rate` for the next reply.
+  `afplay` gets `-r`; other players keep their own tempo.
 - **Client with Play on this Mac**: the panel drives the local `afplay` process
-  directly, with the same pause and seek semantics (the cached WAV is trimmed
-  into a temporary file).
+  directly, with the same pause, seek and rate semantics (the cached WAV is
+  trimmed into a temporary file).
 - **Client without local playback** (or a host whose own queue is idle while the
   other machine is playing): actions are forwarded to the machine that owns the
   sound through `.voice-requests` (`kind: "playback"`), and the audible host

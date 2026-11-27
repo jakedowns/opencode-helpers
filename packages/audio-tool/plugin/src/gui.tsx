@@ -57,8 +57,10 @@ type State = {
     seconds: number
     position: number
     paused: boolean
+    rate: number
     source: "local" | "host"
   }
+  playbackRate?: number
   log?: Array<{ at: string; kind: string; status: string; detail?: string }>
 }
 
@@ -101,6 +103,7 @@ function AudioPanel(props: { session: Session }) {
   // but the seek bar should move every half second.
   const [clock, setClock] = createSignal(Date.now())
   const [seekValue, setSeekValue] = createSignal<number | null>(null)
+  const [rateValue, setRateValue] = createSignal<number | null>(null)
 
   const fail = (action: string, error: unknown) => {
     ctx.toast.show({
@@ -219,7 +222,11 @@ function AudioPanel(props: { session: Session }) {
       .then((next: unknown) => applyState(next as State))
       .catch((error) => fail("clear log", error))
 
-  const playbackAction = (action: "pause" | "resume" | "seek", position?: number) =>
+  const playbackAction = (
+    action: "pause" | "resume" | "seek" | "rate",
+    position?: number,
+    rate?: number,
+  ) =>
     ctx.client
       .rpc(Voice)
       .playback({
@@ -227,11 +234,13 @@ function AudioPanel(props: { session: Session }) {
         sessionID: props.session.id,
         action,
         ...(typeof position === "number" ? { position } : {}),
+        ...(typeof rate === "number" ? { rate } : {}),
       })
       .then((next: unknown) => applyState(next as State))
       .catch((error) => fail("playback", error))
 
   const playback = () => state()?.playback
+  const currentRate = () => rateValue() ?? playback()?.rate ?? state()?.playbackRate ?? 1
   const playbackPosition = () => {
     const p = playback()
     if (!p) return 0
@@ -418,13 +427,13 @@ function AudioPanel(props: { session: Session }) {
               : ""}
         </div>
       </Show>
-      <Show when={playback()}>
-        <div style={{ display: "flex", "flex-direction": "column", gap: "4px" }}>
+      <div style={{ display: "flex", "flex-direction": "column", gap: "4px" }}>
           <div style={{ display: "flex", "align-items": "center", gap: "8px" }}>
             <button
               type="button"
               className="voice-btn"
               aria-pressed={playback()?.paused === true}
+              disabled={!playback()}
               title={playback()?.paused ? "Resume playback" : "Pause playback"}
               onClick={() => void playbackAction(playback()?.paused ? "resume" : "pause")}
             >
@@ -435,6 +444,7 @@ function AudioPanel(props: { session: Session }) {
               min="0"
               max={Math.max(1, playback()?.seconds ?? 0)}
               step="0.1"
+              disabled={!playback()}
               value={shownPosition()}
               onInput={(event) => setSeekValue(Number(event.currentTarget.value))}
               onChange={(event) => {
@@ -452,26 +462,66 @@ function AudioPanel(props: { session: Session }) {
                 "text-align": "right",
               }}
             >
-              {formatTime(shownPosition())} / {formatTime(playback()?.seconds ?? 0)}
+              {playback()
+                ? `${formatTime(shownPosition())} / ${formatTime(playback()?.seconds ?? 0)}`
+                : "--:-- / --:--"}
             </span>
           </div>
           <div
             style={{
-              opacity: 0.6,
-              overflow: "hidden",
-              "text-overflow": "ellipsis",
-              "white-space": "nowrap",
+              display: "flex",
+              "align-items": "center",
+              "justify-content": "space-between",
+              gap: "8px",
             }}
           >
-            {playback()?.source === "host" ? "playing on the host" : "playing on this machine"}
-            {playback()?.session
-              ? ` · ${playback()?.session}`
-              : playback()?.file
-                ? ` · ${playback()?.file?.split("/").pop()}`
-                : ""}
+            <span
+              style={{
+                opacity: 0.6,
+                overflow: "hidden",
+                "text-overflow": "ellipsis",
+                "white-space": "nowrap",
+                "min-width": "0",
+              }}
+            >
+              {playback()
+                ? playback()?.source === "host"
+                  ? "playing on the host"
+                  : "playing on this machine"
+                : "nothing playing"}
+              {playback()?.session
+                ? ` · ${playback()?.session}`
+                : playback()?.file
+                  ? ` · ${playback()?.file?.split("/").pop()}`
+                  : ""}
+            </span>
+            <label
+              style={{
+                display: "flex",
+                "align-items": "center",
+                gap: "4px",
+                opacity: 0.75,
+                "flex": "0 0 auto",
+              }}
+              title="Playback speed (the voice is generated at 1.5× already)"
+            >
+              <span>Speed</span>
+              <select
+                value={String(currentRate())}
+                onChange={(event) => {
+                  const value = Number(event.currentTarget.value)
+                  setRateValue(null)
+                  void playbackAction("rate", undefined, value)
+                }}
+                style={{ "font-size": "11px", padding: "1px 2px" }}
+              >
+                <For each={[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2]}>
+                  {(value) => <option value={String(value)}>{value}×</option>}
+                </For>
+              </select>
+            </label>
           </div>
-        </div>
-      </Show>
+      </div>
       <Show when={state()?.stats}>
         <div style={{ opacity: 0.7 }} title={statsTitle()}>
           Voice: this {sessionStats()?.turns ?? 0} turns · {sessionStats()?.spoken ?? 0} spoken
