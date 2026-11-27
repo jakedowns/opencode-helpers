@@ -54,6 +54,14 @@ function readState(root) {
         at: parsed.lastPurge.at,
         removed: Number(parsed.lastPurge.removed) || 0,
         bytes: Number(parsed.lastPurge.bytes) || 0
+      } : void 0,
+      stats: parsed?.stats && typeof parsed.stats.at === "number" ? {
+        at: parsed.stats.at,
+        windowStart: Number(parsed.stats.windowStart) || parsed.stats.at,
+        turns: Number(parsed.stats.turns) || 0,
+        spoken: Number(parsed.stats.spoken) || 0,
+        skipped: parsed.stats.skipped && typeof parsed.stats.skipped === "object" ? parsed.stats.skipped : {},
+        sessions: parsed.stats.sessions && typeof parsed.stats.sessions === "object" ? parsed.stats.sessions : {}
       } : void 0
     };
   } catch {
@@ -101,6 +109,7 @@ function setSidebar(root, visible) {
   state2.sidebar = visible;
   return writeState(root, state2);
 }
+var STATS_WINDOW_MS = 24 * 60 * 60 * 1e3;
 
 // node_modules/@opencode/schema/dist/rpc.js
 var rpc_exports = {};
@@ -178,6 +187,19 @@ var state = {
         bytes: { type: "number" }
       },
       required: ["at", "files", "bytes"],
+      additionalProperties: false
+    },
+    stats: {
+      type: "object",
+      properties: {
+        at: { type: "number" },
+        windowStart: { type: "number" },
+        turns: { type: "number" },
+        spoken: { type: "number" },
+        skipped: { type: "object", additionalProperties: true },
+        sessions: { type: "object", additionalProperties: true }
+      },
+      required: ["at", "windowStart", "turns", "spoken", "skipped", "sessions"],
       additionalProperties: false
     },
     lastSpeaker: {

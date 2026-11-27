@@ -150,7 +150,9 @@ the host.
 - Auto-speak hook (`experimental.idle`): picks the last assistant message, skips
   reasoning parts, sanitises markdown, dedupes by message id, caps at
   `maxChars`, and speaks. When nothing is speakable it announces the session
-  name and says the message was untranscribable instead of going silent.
+  name and says the message was untranscribable instead of going silent. Every
+  turn is counted in `.voice-state.json` as spoken or skipped (`noText`,
+  `tooLong`, `duplicate`, `muted`, `subagent`, `remote`, `error`).
 - `voice_control` (`tools.voice.control`): `mute`, `unmute`, `status` with
   `session`, `project`, or `global` scope. Any active mute silences; state lives
   in `.voice-state.json` at the plugin root (git-ignored), shared with the TUI.
@@ -274,6 +276,7 @@ Both clients also show live state in the GUI Audio panel and TUI sidebar:
 Mode: host · Data: local (5s old) · Auto-speak: on   ← clickable: mute all / turn on
 Cache: 4.3 MB · 7 files
 Queue: 0 queued · 1 playing · 2 generating — Agent Voice Tool
+Voice: this 12 turns · 5 spoken · 3 missed | 24h 219 turns · 31 spoken · 12 missed
 Volume [==========|-------] 70%       ← slider; "host" on a client
 Last purge: removed 2 files, freed 919.3 KB
 ```
@@ -281,6 +284,15 @@ Last purge: removed 2 files, freed 919.3 KB
 `generating` counts synthesis in flight (active speaks plus claimed
 `.voice-requests`). When nothing is playing, the queue line keeps the most
 recent speaker as `latest: <name>` instead of going blank.
+
+The `Voice:` line counts auto-speak hook turns, not agent tool calls. `spoken`
+means a durable reply (or a client request) was produced; `missed` sums
+`noText`, `tooLong`, `error`, and `remote`. Hover it for the full per-reason
+breakdown for this session and the rolling 24 h window. Muted and subagent
+turns are counted as turns but not as missed; `duplicate` is a legitimate
+skip. Because the counters live in the plugin, a plugin that fails to load
+contributes no turns at all — cross-check `session_message` idle rows if the
+numbers go suspiciously quiet.
 
 `Data` names where the panel's numbers came from: `local` for a host that
 measured them itself, `host` for a client reading the shared state, followed by

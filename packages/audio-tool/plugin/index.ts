@@ -36,6 +36,8 @@ import {
   setQueue,
   setGenerating,
   setSidebar,
+  recordVoiceEvent,
+  type VoiceStats,
 } from "./state.ts"
 import { Voice } from "./rpc.ts"
 
@@ -1021,6 +1023,7 @@ async function voiceState(
     audio: AudioStatus
     queue: { queued: number; playing: number; failed: number }
     generating: number
+    stats?: VoiceStats
     lastSpeaker?: { at: number; session: string }
     lastPurge?: { at: number; removed: number; bytes: number }
     lastAttempt?: { at: number; removed: number; bytes: number }
@@ -1039,6 +1042,7 @@ async function voiceState(
     audio,
     queue,
   }
+  if (state.stats) result.stats = state.stats
   if (state.lastSpeaker) result.lastSpeaker = state.lastSpeaker
   if (state.lastPurge) result.lastPurge = state.lastPurge
   if (state.lastAttempt) result.lastAttempt = state.lastAttempt
@@ -1560,27 +1564,39 @@ export default Plugin.define({
 
     try {
       await ctx.session.hook("experimental.idle", async (event) => {
+        let outcome = "error"
         try {
           const meta = await sessionMeta(ctx, event.sessionID)
           if (meta.parentID && !speakSubagents) {
+            outcome = "subagent"
             log(`skip subagent ${event.sessionID} (speakSubagents off)`)
             return
           }
           const mutes = await readMutes(ctx, root, location, event.sessionID)
           if (mutes.global || mutes.project || mutes.session) {
+            outcome = "muted"
             log(`muted (${JSON.stringify(mutes)})`)
             return
           }
           const messages = await ctx.session.context({ sessionID: event.sessionID })
           const last = pickLastAssistant(messages as any[])
-          if (!last || spoken.has(last.id)) return
+          if (!last) {
+            outcome = "noText"
+            return
+          }
+          if (spoken.has(last.id)) {
+            outcome = "duplicate"
+            return
+          }
           const cleaned = sanitise(last.text)
           if (cleaned.length > maxChars) {
+            outcome = "tooLong"
             log(`skip ${last.id}: ${cleaned.length} chars over ${maxChars}`)
             return
           }
           spoken.add(last.id)
           if (mode === "remote") {
+            outcome = "remote"
             log("remote mode: not implemented, skipping auto-speak")
             return
           }
@@ -1590,6 +1606,7 @@ export default Plugin.define({
             const payload = cleaned || noticeTemplate.replaceAll("{session}", title)
             const request = writeRequest(root, payload, event.sessionID, resolved, Boolean(meta.parentID))
             log(`requested ${request.id}${cleaned ? "" : " (untranscribable notice)"}`)
+            outcome = cleaned ? "spoken" : "noText"
             return
           }
           if (!cleaned) {
@@ -1605,6 +1622,7 @@ export default Plugin.define({
               session: result.title ?? title,
               child: Boolean(meta.parentID),
             })
+            outcome = "noText"
             return
           }
           const result = await speakDurable(root, location, cleaned, { sessionID: event.sessionID })
@@ -1616,8 +1634,12 @@ export default Plugin.define({
             session: result.title ?? undefined,
             child: Boolean(meta.parentID),
           })
+          outcome = "spoken"
         } catch (error) {
+          outcome = "error"
           log("auto-speak failed", String(error))
+        } finally {
+          recordVoiceEvent(root, event.sessionID, outcome)
         }
       })
       log("auto-speak hook registered")

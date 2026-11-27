@@ -72,6 +72,19 @@ const state = {
       required: ["at", "files", "bytes"],
       additionalProperties: false,
     },
+    stats: {
+      type: "object",
+      properties: {
+        at: { type: "number" },
+        windowStart: { type: "number" },
+        turns: { type: "number" },
+        spoken: { type: "number" },
+        skipped: { type: "object", additionalProperties: true },
+        sessions: { type: "object", additionalProperties: true },
+      },
+      required: ["at", "windowStart", "turns", "spoken", "skipped", "sessions"],
+      additionalProperties: false,
+    },
     lastSpeaker: {
       type: "object",
       properties: {

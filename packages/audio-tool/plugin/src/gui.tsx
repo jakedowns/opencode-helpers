@@ -18,6 +18,15 @@ type Cache = { at: number; files: number; bytes: number }
 type Audio = { at: number; available: boolean; muted: boolean; volume: number }
 type QueueStats = { queued: number; playing: number; failed: number; playingSession?: string }
 type LastSpeaker = { at: number; session: string }
+type VoiceStatsRow = { turns: number; spoken: number; skipped: Record<string, number> }
+type VoiceStats = {
+  at: number
+  windowStart: number
+  turns: number
+  spoken: number
+  skipped: Record<string, number>
+  sessions: Record<string, VoiceStatsRow>
+}
 type State = {
   entries: Entry[]
   mutes: Mutes
@@ -29,6 +38,7 @@ type State = {
   audio?: Audio
   queue?: QueueStats
   generating?: number
+  stats?: VoiceStats
   lastSpeaker?: LastSpeaker
   lastPurge?: Purge
   lastAttempt?: Purge
@@ -156,6 +166,29 @@ function AudioPanel(props: { session: Session }) {
     return ""
   }
 
+  const missedCount = (row?: VoiceStatsRow) => {
+    if (!row) return 0
+    return ["noText", "tooLong", "error", "remote"].reduce(
+      (sum, key) => sum + (row.skipped[key] ?? 0),
+      0,
+    )
+  }
+  const sessionStats = () => state()?.stats?.sessions?.[props.session.id]
+  const statsTitle = () => {
+    const global = state()?.stats
+    const row = sessionStats()
+    const fmt = (value: VoiceStatsRow | undefined) => {
+      if (!value) return "no turns yet"
+      const reasons = Object.entries(value.skipped)
+        .map(([key, count]) => `${key} ${count}`)
+        .join(", ")
+      return `turns ${value.turns}, spoken ${value.spoken}, missed ${missedCount(value)}${
+        reasons ? ` (${reasons})` : ""
+      }`
+    }
+    return `This session: ${fmt(row)}\nLast 24h: ${fmt(global)}`
+  }
+
   return (
     <div
       style={{
@@ -239,6 +272,14 @@ function AudioPanel(props: { session: Session }) {
             : state()?.lastSpeaker
               ? ` · latest: ${state()?.lastSpeaker?.session}`
               : ""}
+        </div>
+      </Show>
+      <Show when={state()?.stats}>
+        <div style={{ opacity: 0.7 }} title={statsTitle()}>
+          Voice: this {sessionStats()?.turns ?? 0} turns · {sessionStats()?.spoken ?? 0} spoken
+          {" · "}{missedCount(sessionStats())} missed
+          {" | 24h "}{state()?.stats?.turns ?? 0} turns · {state()?.stats?.spoken ?? 0} spoken
+          {" · "}{missedCount(state()?.stats)} missed
         </div>
       </Show>
       <Show when={state()?.audio?.available}>

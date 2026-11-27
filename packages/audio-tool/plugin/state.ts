@@ -23,6 +23,21 @@ export type QueueStats = {
 export type LastSpeaker = { at: number; session: string }
 export type Generating = { at: number; count: number }
 
+export type VoiceSessionStats = {
+  turns: number
+  spoken: number
+  skipped: Record<string, number>
+}
+
+export type VoiceStats = {
+  at: number
+  windowStart: number
+  turns: number
+  spoken: number
+  skipped: Record<string, number>
+  sessions: Record<string, VoiceSessionStats>
+}
+
 export type VoiceState = {
   global: boolean
   projects: Record<string, boolean>
@@ -35,6 +50,7 @@ export type VoiceState = {
   queue?: QueueStats
   lastSpeaker?: LastSpeaker
   generating?: Generating
+  stats?: VoiceStats
 }
 
 const EMPTY: VoiceState = { global: false, projects: {}, sessions: {}, sidebar: true }
@@ -102,6 +118,23 @@ export function readState(root: string): VoiceState {
               at: parsed.lastPurge.at,
               removed: Number(parsed.lastPurge.removed) || 0,
               bytes: Number(parsed.lastPurge.bytes) || 0,
+            }
+          : undefined,
+      stats:
+        parsed?.stats && typeof parsed.stats.at === "number"
+          ? {
+              at: parsed.stats.at,
+              windowStart: Number(parsed.stats.windowStart) || parsed.stats.at,
+              turns: Number(parsed.stats.turns) || 0,
+              spoken: Number(parsed.stats.spoken) || 0,
+              skipped:
+                parsed.stats.skipped && typeof parsed.stats.skipped === "object"
+                  ? parsed.stats.skipped
+                  : {},
+              sessions:
+                parsed.stats.sessions && typeof parsed.stats.sessions === "object"
+                  ? parsed.stats.sessions
+                  : {},
             }
           : undefined,
     }
@@ -206,4 +239,43 @@ export function setGenerating(root: string, count: number): VoiceState {
   const state = readState(root)
   state.generating = { at: Date.now(), count: Math.max(0, count) }
   return writeState(root, state)
+}
+
+const STATS_WINDOW_MS = 24 * 60 * 60 * 1000
+const MAX_STATS_SESSIONS = 100
+
+/**
+ * Count one auto-speak turn and its outcome. The window is a simple 24h
+ * bucket (reset wholesale once it expires); this is a debug panel, not an
+ * analytics store. `spoken` is a real durable reply; every other outcome is a
+ * skip reason (`noText`, `tooLong`, `duplicate`, `muted`, `subagent`,
+ * `remote`, `error`).
+ */
+export function recordVoiceEvent(
+  root: string,
+  sessionID: string,
+  outcome: "spoken" | string,
+): VoiceStats {
+  const now = Date.now()
+  const state = readState(root)
+  let stats = state.stats
+  if (!stats || now - stats.windowStart > STATS_WINDOW_MS) {
+    stats = { at: now, windowStart: now, turns: 0, spoken: 0, skipped: {}, sessions: {} }
+  }
+  stats.at = now
+  stats.turns += 1
+  const row = (stats.sessions[sessionID] ??= { turns: 0, spoken: 0, skipped: {} })
+  row.turns += 1
+  if (outcome === "spoken") {
+    stats.spoken += 1
+    row.spoken += 1
+  } else {
+    stats.skipped[outcome] = (stats.skipped[outcome] ?? 0) + 1
+    row.skipped[outcome] = (row.skipped[outcome] ?? 0) + 1
+  }
+  const ids = Object.keys(stats.sessions)
+  if (ids.length > MAX_STATS_SESSIONS) delete stats.sessions[ids[0]]
+  state.stats = stats
+  writeState(root, state)
+  return stats
 }
