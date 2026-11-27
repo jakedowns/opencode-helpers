@@ -16,6 +16,7 @@ on:
     tags:
       - nudge-core@*
       - nudge-opencode@*
+      - assistant-voice-opencode-plugin@*
   workflow_dispatch:
     inputs:
       tag:
@@ -69,6 +70,11 @@ jobs:
               echo "PACKAGE_NAME=@jakedowns/opencode-nudge" >> "$GITHUB_ENV"
               echo "EXPECTED_VERSION=${RELEASE_TAG#nudge-opencode@}" >> "$GITHUB_ENV"
               ;;
+            assistant-voice-opencode-plugin@*)
+              echo "PACKAGE_DIR=packages/audio-tool/plugin" >> "$GITHUB_ENV"
+              echo "PACKAGE_NAME=@jakedowns/assistant-voice-opencode-plugin" >> "$GITHUB_ENV"
+              echo "EXPECTED_VERSION=${RELEASE_TAG#assistant-voice-opencode-plugin@}" >> "$GITHUB_ENV"
+              ;;
             *)
               echo "::error::Unknown release tag $RELEASE_TAG"
               exit 1
@@ -91,9 +97,19 @@ jobs:
       - name: Test and build
         run: |
           set -euo pipefail
-          npm test
-          npm run build --workspace @jakedowns/opencode-nudge-core
-          npm run build --workspace @jakedowns/opencode-nudge
+          case "$PACKAGE_NAME" in
+            @jakedowns/assistant-voice-opencode-plugin)
+              # Not a root workspace: its parts resolve by file name, and the
+              # client bundles need the package's own @opencode/plugin.
+              npm install --prefix "$PACKAGE_DIR" --no-audit --no-fund
+              npm run build --prefix "$PACKAGE_DIR"
+              ;;
+            *)
+              npm test
+              npm run build --workspace @jakedowns/opencode-nudge-core
+              npm run build --workspace @jakedowns/opencode-nudge
+              ;;
+          esac
 
       - name: Publish
         working-directory: ${{ env.PACKAGE_DIR }}
